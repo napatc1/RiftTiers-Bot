@@ -495,8 +495,16 @@ create table if not exists support_messages (
   author_label text,
   source text not null check (source in ('website', 'discord')),
   content text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  edited_at timestamptz,
+  discord_message_id text
 );
+
+-- Safe to re-run against a support_messages table created before these existed.
+alter table support_messages add column if not exists edited_at timestamptz;
+alter table support_messages add column if not exists discord_message_id text;
+create unique index if not exists support_messages_discord_message_id_key
+  on support_messages (discord_message_id) where discord_message_id is not null;
 
 alter table support_tickets enable row level security;
 alter table support_messages enable row level security;

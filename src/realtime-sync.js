@@ -131,7 +131,7 @@ async function createTicketChannel(guild, ticket) {
           .setDescription(
             `Opened by **${player?.username || "a player"}** on the website.\n\n` +
               (firstMessage?.content || "*(no message)*") +
-              "\n\nReplies here are sent to the player on the website, and their replies show up here too."
+              "\n\nReplies here are sent to the player on the website, and their replies show up here too. Edits and deletes sync too. Closing the ticket on the website deletes this channel and moves it to ticket history on the site."
           )
           .setColor(0x3fa0f5),
       ],
@@ -148,12 +148,20 @@ async function createTicketChannel(guild, ticket) {
   }
 }
 
+// A closed ticket keeps living as "History" on the website only — the
+// Discord side of it is torn down entirely (no leftover/archive channel in
+// Discord). Posts a quick heads-up, then deletes the channel a few seconds
+// later so anyone currently looking at it sees why it's going away.
 async function closeTicketChannel(guild, ticket) {
   try {
     if (!ticket.discord_channel_id) return;
     const channel = await guild.channels.fetch(ticket.discord_channel_id).catch(() => null);
     if (!channel) return;
-    await channel.send({ content: "🔒 This ticket was closed on the website." });
+    ticketChannelMap.delete(channel.id);
+    await channel.send({ content: "🔒 This ticket was closed on the website — this channel will be deleted shortly. It's kept in ticket history on the site." }).catch(() => {});
+    setTimeout(() => {
+      channel.delete().catch((err) => console.error("[realtime-sync] failed to delete closed ticket channel:", err.message));
+    }, 5000);
   } catch (err) {
     console.error("[realtime-sync] closeTicketChannel failed:", err.message);
   }
@@ -201,9 +209,45 @@ async function handleTicketChannelMessage(message) {
       author_label: message.member?.displayName || message.author.username,
       source: "discord",
       content: message.content || "*(no text content)*",
+      discord_message_id: message.id,
     });
   } catch (err) {
     console.error("[realtime-sync] handleTicketChannelMessage failed:", err.message);
+  }
+}
+
+// Called from index.js's messageUpdate listener. Only known ticket-channel
+// messages that we actually mirrored (i.e. have a discord_message_id row)
+// are updated — edits to anything else, or to the bot's own messages, are
+// silently ignored.
+async function handleTicketChannelMessageEdit(message) {
+  if (message.author?.bot) return;
+  const ticketId = ticketChannelMap.get(message.channelId);
+  if (!ticketId) return;
+
+  try {
+    await supabase
+      .from("support_messages")
+      .update({
+        content: message.content || "*(no text content)*",
+        edited_at: new Date().toISOString(),
+      })
+      .eq("discord_message_id", message.id);
+  } catch (err) {
+    console.error("[realtime-sync] handleTicketChannelMessageEdit failed:", err.message);
+  }
+}
+
+// Called from index.js's messageDelete listener. Removes the mirrored row
+// entirely so it disappears from the website thread too.
+async function handleTicketChannelMessageDelete(message) {
+  const ticketId = ticketChannelMap.get(message.channelId);
+  if (!ticketId) return;
+
+  try {
+    await supabase.from("support_messages").delete().eq("discord_message_id", message.id);
+  } catch (err) {
+    console.error("[realtime-sync] handleTicketChannelMessageDelete failed:", err.message);
   }
 }
 
@@ -249,4 +293,10 @@ async function initRealtimeSync(guild) {
   console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages");
 }
 
-module.exports = { initRealtimeSync, handleTicketChannelMessage, assignTierRole };
+module.exports = {
+  initRealtimeSync,
+  handleTicketChannelMessage,
+  handleTicketChannelMessageEdit,
+  handleTicketChannelMessageDelete,
+  assignTierRole,
+};

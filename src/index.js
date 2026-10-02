@@ -14,6 +14,7 @@ const {
   ChannelType,
   REST,
   Routes,
+  Partials,
 } = require("discord.js");
 const commands = require("./commands");
 const {
@@ -67,7 +68,12 @@ const {
   setQueueMessage,
   getQueueMessage,
 } = require("./supabase");
-const { initRealtimeSync, handleTicketChannelMessage } = require("./realtime-sync");
+const {
+  initRealtimeSync,
+  handleTicketChannelMessage,
+  handleTicketChannelMessageEdit,
+  handleTicketChannelMessageDelete,
+} = require("./realtime-sync");
 
 const client = new Client({
   intents: [
@@ -76,6 +82,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
   ],
+  // Lets messageUpdate/messageDelete still fire (as partials) for messages
+  // that fell out of the cache, so edits/deletes keep mirroring to the
+  // website even for older ticket messages.
+  partials: [Partials.Message, Partials.Channel],
 });
 
 // ---------- helpers ----------
@@ -1663,6 +1673,22 @@ client.on("guildMemberUpdate", (_oldMember, newMember) => {
 // channel, so this is cheap to call for every message).
 client.on("messageCreate", (message) => {
   handleTicketChannelMessage(message);
+});
+
+// Edits/deletes of a mirrored ticket message on the Discord side should show
+// up the same way on the website — edit updates the row, delete removes it.
+client.on("messageUpdate", async (oldMessage, newMessage) => {
+  try {
+    const full = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
+    if (!full) return;
+    handleTicketChannelMessageEdit(full);
+  } catch (err) {
+    console.error("messageUpdate handler error:", err.message);
+  }
+});
+
+client.on("messageDelete", (message) => {
+  handleTicketChannelMessageDelete(message);
 });
 
 // Catch anything that slips through interaction handling so a single bad
