@@ -465,6 +465,77 @@ client.on("interactionCreate", async (interaction) => {
     return;
   }
 
+  // /setupqueues — one-time setup: creates any missing tiertest channels
+  // and posts a fresh queue message in every channel that doesn't already
+  // have one tracked. Safe to re-run after adding a new gamemode to
+  // GAMEMODE_CHANNELS — it only touches what's missing.
+  if (interaction.isChatInputCommand() && interaction.commandName === "setupqueues") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
+    }
+    const botMember = interaction.guild.members.me;
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+      return interaction.reply({
+        content: "I need the **Manage Channels** permission to create the tiertest channels. Grant that to my role and try again.",
+        ephemeral: true,
+      });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const region = interaction.options.getString("region", true);
+
+    let category = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tier testing"
+    );
+    if (!category) {
+      category = await interaction.guild.channels.create({
+        name: "Tier Testing",
+        type: ChannelType.GuildCategory,
+      });
+    }
+
+    const created = [];
+    const posted = [];
+    const skipped = [];
+
+    for (const [channelName, gamemode] of Object.entries(GAMEMODE_CHANNELS)) {
+      let channel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === channelName
+      );
+      if (!channel) {
+        channel = await interaction.guild.channels.create({
+          name: channelName,
+          type: ChannelType.GuildText,
+          parent: category.id,
+        });
+        created.push(channelName);
+      }
+
+      const existingMsgInfo = getQueueMessage(gamemode);
+      if (existingMsgInfo) {
+        skipped.push(channelName);
+        continue;
+      }
+
+      await setQueueRegion(gamemode, region);
+      const queueMsg = await channel.send({
+        content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
+        embeds: [await buildQueueEmbed(gamemode, gamemode)],
+        components: [await buildQueueButtons(gamemode)],
+      });
+      setQueueMessage(gamemode, channel.id, queueMsg.id);
+      posted.push(channelName);
+    }
+
+    const lines = [];
+    if (created.length) lines.push(`**Created:** ${created.join(", ")}`);
+    if (posted.length) lines.push(`**Posted a queue in:** ${posted.join(", ")}`);
+    if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);
+    return interaction.editReply({
+      content: lines.length ? lines.join("\n") : "Nothing to do — every tiertest channel already has a queue.",
+    });
+  }
+
   // /verify
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
     const username = interaction.options.getString("username", true).trim();

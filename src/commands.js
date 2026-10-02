@@ -57,6 +57,19 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("setupqueues")
+    .setDescription(
+      "One-time setup: creates every tiertest channel that's missing and posts a queue in each."
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("region")
+        .setDescription("Region to set on any queue this creates (you can change it later with /postqueue)")
+        .setRequired(true)
+        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
+    ),
+
+  new SlashCommandBuilder()
     .setName("postverifyinfo")
     .setDescription(
       "Post step-by-step account-linking instructions to the verify-info channel."
