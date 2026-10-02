@@ -82,10 +82,18 @@ create table if not exists profiles (
   discord_id text unique not null,
   discord_username text,
   player_id bigint references players(id),
-  is_tester boolean not null default false,
-  is_manager boolean not null default false,
+  is_tester boolean not null default false,          -- tester, senior tester, manager or owner
+  is_senior_tester boolean not null default false,    -- senior tester or owner
+  is_manager boolean not null default false,          -- manager or owner
+  is_moderator boolean not null default false,        -- moderator or owner — ticket/support access
+  is_owner boolean not null default false,            -- owner only — can do anything
   roles_synced_at timestamptz
 );
+
+-- Safe to re-run against a profiles table created before these columns existed.
+alter table profiles add column if not exists is_senior_tester boolean not null default false;
+alter table profiles add column if not exists is_moderator boolean not null default false;
+alter table profiles add column if not exists is_owner boolean not null default false;
 
 -- ============================================================
 -- 2. NEW LOGIN -> PROFILE + PLAYER ROW, AUTOMATICALLY
@@ -197,6 +205,34 @@ security definer
 stable
 as $$
   select coalesce(is_manager, false) from profiles where id = auth.uid();
+$$;
+
+create or replace function current_is_senior_tester()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select coalesce(is_senior_tester, false) from profiles where id = auth.uid();
+$$;
+
+-- Moderators (and owners) get ticket/support oversight — "can access all tickets".
+create or replace function current_is_moderator()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select coalesce(is_moderator, false) from profiles where id = auth.uid();
+$$;
+
+create or replace function current_is_owner()
+returns boolean
+language sql
+security definer
+stable
+as $$
+  select coalesce(is_owner, false) from profiles where id = auth.uid();
 $$;
 
 -- ============================================================
