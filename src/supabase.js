@@ -472,6 +472,75 @@ async function syncProfileRoles(discordId, flags) {
   if (error) console.error("[roles] syncProfileRoles error:", error.message);
 }
 
+// ---------- support tickets opened from Discord (#request-support) ----------
+
+// Mirrors create_support_ticket's website RPC, but called with the
+// service-role key from the bot side. The realtime-sync "new support
+// ticket" listener (same one the website's create_support_ticket uses)
+// picks this up and creates the private ticket channel automatically —
+// same flow regardless of which side opened it.
+async function createSupportTicketFromDiscord(discordUserId, displayName, category, subject, message) {
+  const player = await ensurePlayerForDiscordUser(discordUserId, displayName);
+  const { data: ticket, error } = await supabase
+    .from("support_tickets")
+    .insert({ player_id: player.id, category, subject })
+    .select("id")
+    .single();
+  if (error) throw error;
+
+  await supabase.from("support_messages").insert({
+    ticket_id: ticket.id,
+    author_player_id: player.id,
+    author_label: displayName,
+    source: "discord",
+    content: message,
+  });
+
+  return ticket.id;
+}
+
+// ---------- tester applications (#tester-application) ----------
+
+async function createTesterApplication(discordUserId, { ign, region, experience, availability }) {
+  const { data, error } = await supabase
+    .from("tester_applications")
+    .insert({ discord_id: discordUserId, ign, region, experience, availability })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
+async function getTesterApplication(applicationId) {
+  const { data } = await supabase
+    .from("tester_applications")
+    .select("*")
+    .eq("id", applicationId)
+    .maybeSingle();
+  return data;
+}
+
+async function setTesterApplicationReviewMessage(applicationId, channelId, messageId) {
+  await supabase
+    .from("tester_applications")
+    .update({ review_channel_id: channelId, review_message_id: messageId })
+    .eq("id", applicationId);
+}
+
+// Returns false (instead of throwing) if the application was already
+// decided, so the button handler can tell the reviewer it's stale.
+async function decideTesterApplication(applicationId, status, reviewerDiscordId) {
+  const { data, error } = await supabase
+    .from("tester_applications")
+    .update({ status, reviewed_by_discord_id: reviewerDiscordId, reviewed_at: new Date().toISOString() })
+    .eq("id", applicationId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -509,4 +578,9 @@ module.exports = {
   clearActiveTestingByTicket,
   setQueueMessage,
   getQueueMessage,
+  createSupportTicketFromDiscord,
+  createTesterApplication,
+  getTesterApplication,
+  setTesterApplicationReviewMessage,
+  decideTesterApplication,
 };

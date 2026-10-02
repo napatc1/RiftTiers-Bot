@@ -60,15 +60,41 @@ const COOLDOWN_DAYS = 3;
 // queueCategoryName() below.
 const SUPPORT_CATEGORY_NAME = "Support Tickets";
 const GENERAL_CATEGORY_NAME = "General";
-const TESTING_CATEGORY_NAME = "Testing";
 
-// Reference channels /setupqueues creates under TESTING_CATEGORY_NAME.
-// "testing-rubric" gets the tier rubric posted into it automatically the
-// first time it's created (same one-shot-on-create pattern as #verify).
-const TESTING_CHANNELS = [
-  { name: "testing-rubric" },
+// Was "Testing" with 2 channels; renamed/expanded to "Tierlist" with 6.
+// OLD_TESTING_CATEGORY_NAME is kept so /setupqueues can find and rename an
+// existing "Testing" category from before this change instead of leaving a
+// stray duplicate category behind.
+const TIERLIST_CATEGORY_NAME = "Tierlist";
+const OLD_TESTING_CATEGORY_NAME = "Testing";
+
+// Reference channels /setupqueues creates under TIERLIST_CATEGORY_NAME.
+// "ranked-rubric"/"ranked-ruleset"/"punishments" get their info posted
+// automatically the first time each is created (same pattern as #verify).
+const TIERLIST_CHANNELS = [
+  { name: "ranked-rubric" },
+  { name: "ranked-ruleset" },
+  { name: "punishments" },
+  { name: "testing-leaderboard" },
+  { name: "high-results" },
   { name: "results" },
 ];
+
+// "Requests" category: the public entry points for queueing, opening a
+// support ticket, and applying to be a tester. All three are read-only
+// (locked the same way as tiertest channels) — interaction is via the
+// buttons/select menu posted into them, not by typing.
+const REQUESTS_CATEGORY_NAME = "Requests";
+const REQUEST_TEST_CHANNEL_NAME = "request-test";
+const REQUEST_SUPPORT_CHANNEL_NAME = "request-support";
+const TESTER_APPLICATION_CHANNEL_NAME = "tester-application";
+
+// Staff-only category for reviewing tester applications. Same permission
+// pattern as SUPPORT_CATEGORY_NAME (deny @everyone, allow manager/
+// moderator/owner) but kept separate since application review is a
+// different audience/purpose than support tickets.
+const STAFF_CATEGORY_NAME = "Staff";
+const TESTER_APP_REVIEW_CHANNEL_NAME = "tester-app-reviews";
 
 // Basic non-gamemode channels /setupqueues creates under GENERAL_CATEGORY_NAME.
 // "verify" gets the account-linking info posted into it automatically the
@@ -113,8 +139,15 @@ module.exports = {
   COOLDOWN_DAYS,
   SUPPORT_CATEGORY_NAME,
   GENERAL_CATEGORY_NAME,
-  TESTING_CATEGORY_NAME,
-  TESTING_CHANNELS,
+  TIERLIST_CATEGORY_NAME,
+  OLD_TESTING_CATEGORY_NAME,
+  TIERLIST_CHANNELS,
+  REQUESTS_CATEGORY_NAME,
+  REQUEST_TEST_CHANNEL_NAME,
+  REQUEST_SUPPORT_CHANNEL_NAME,
+  TESTER_APPLICATION_CHANNEL_NAME,
+  STAFF_CATEGORY_NAME,
+  TESTER_APP_REVIEW_CHANNEL_NAME,
   BASIC_CHANNELS,
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,

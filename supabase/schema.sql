@@ -619,6 +619,33 @@ revoke all on function create_support_ticket, send_support_message, close_suppor
 grant execute on function create_support_ticket, send_support_message, close_support_ticket to authenticated;
 
 -- ============================================================
+-- 9b. TESTER APPLICATIONS — applied for and reviewed entirely in Discord
+--     (#tester-application to apply, a staff-only channel to review), so
+--     this is written/read only by the bot's service-role key, no RPCs or
+--     website UI needed.
+-- ============================================================
+
+create table if not exists tester_applications (
+  id bigint generated always as identity primary key,
+  discord_id text not null,
+  ign text not null,
+  region text not null,
+  experience text not null,
+  availability text not null,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'denied')),
+  review_channel_id text,
+  review_message_id text,
+  reviewed_by_discord_id text,
+  created_at timestamptz not null default now(),
+  reviewed_at timestamptz
+);
+
+alter table tester_applications enable row level security;
+-- No policies defined on purpose — only the bot's service-role key (which
+-- bypasses RLS) touches this table; nobody can read/write it through the
+-- anon/authenticated website client.
+
+-- ============================================================
 -- 10. REALTIME — so the Queues/Results/Support subtabs update live for
 --     everyone, and so the bot can react to new tickets/messages
 -- ============================================================

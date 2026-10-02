@@ -15,6 +15,7 @@ const {
   REST,
   Routes,
   Partials,
+  StringSelectMenuBuilder,
 } = require("discord.js");
 const commands = require("./commands");
 const {
@@ -26,8 +27,15 @@ const {
   PERMISSION_ROLE_IDS,
   SUPPORT_CATEGORY_NAME,
   GENERAL_CATEGORY_NAME,
-  TESTING_CATEGORY_NAME,
-  TESTING_CHANNELS,
+  TIERLIST_CATEGORY_NAME,
+  OLD_TESTING_CATEGORY_NAME,
+  TIERLIST_CHANNELS,
+  REQUESTS_CATEGORY_NAME,
+  REQUEST_TEST_CHANNEL_NAME,
+  REQUEST_SUPPORT_CHANNEL_NAME,
+  TESTER_APPLICATION_CHANNEL_NAME,
+  STAFF_CATEGORY_NAME,
+  TESTER_APP_REVIEW_CHANNEL_NAME,
   BASIC_CHANNELS,
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
@@ -69,6 +77,11 @@ const {
   clearActiveTestingByTicket,
   setQueueMessage,
   getQueueMessage,
+  createSupportTicketFromDiscord,
+  createTesterApplication,
+  getTesterApplication,
+  setTesterApplicationReviewMessage,
+  decideTesterApplication,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -224,6 +237,204 @@ function buildTestingRubricEmbed() {
         `**Retesting**\nAfter a result, you're on a ${COOLDOWN_DAYS}-day cooldown before you can queue again for that same gamemode, so testers aren't re-testing the same players back-to-back. Staff can lift this early for a good reason — ask in a ticket.\n\n` +
         "**Conduct**\nBe respectful to your tester and anyone else in the ticket. Stream-sniping, cheating, smurfing to dodge a known result, or being abusive toward staff will get your test cancelled and can lead to a ban from testing entirely."
     );
+}
+
+// Rules/conduct side of testing — separate from the rubric (how tiers are
+// judged). Edit to taste; posted automatically the first time
+// #ranked-ruleset is created.
+function buildTestingRulesetEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Ranked Testing Ruleset")
+    .setColor(0x3fa0f5)
+    .setDescription(
+      "**Before you queue**\n" +
+        "• You must be verified (`/verify` or the website's Verify tab) before you can join any queue.\n" +
+        `• You're on a ${COOLDOWN_DAYS}-day cooldown after each result for that gamemode — you can't be retested sooner unless staff lifts it.\n` +
+        "• Only queue in the region you'll actually be able to play on. Testers match you to testers in your set region.\n\n" +
+        "**During a test**\n" +
+        "• Be on time once pulled into a ticket — testers can cancel a no-show after a few minutes.\n" +
+        "• No alternate accounts, stream-sniping, or outside help during the test.\n" +
+        "• Play your honest best. Sandbagging to get an easier tier, or smurfing to avoid a known result, voids the test.\n" +
+        "• Listen to the tester's calls — if you disagree, raise it respectfully after the test or open a ticket, not mid-game.\n\n" +
+        "**After a test**\n" +
+        "• Your tier is posted automatically once the tester submits a result.\n" +
+        "• Think a result was wrong? Open an **Appeal a tier** ticket with your reasoning.\n\n" +
+        "Breaking these rules can get a test voided, cancel your current cooldown exemption, or lead to a testing ban — see #punishments."
+    );
+}
+
+// Punishment/escalation reference for testing-rule violations. Edit to
+// taste; posted automatically the first time #punishments is created.
+function buildPunishmentsEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Testing Punishments")
+    .setColor(0xe05a5a)
+    .setDescription(
+      "Violations of #ranked-ruleset are handled case by case by staff, but as a general guide:\n\n" +
+        "**Minor** _(being disrespectful to a tester, wasting a tester's time, minor sandbagging)_\n" +
+        "→ Warning, and the test may be voided.\n\n" +
+        "**Major** _(cheating, using an alt to dodge a result, stream-sniping)_\n" +
+        "→ Test voided, temporary testing ban (duration at staff discretion).\n\n" +
+        "**Severe** _(repeat offenses, abusive behavior toward staff/testers)_\n" +
+        "→ Permanent testing ban, possible server ban.\n\n" +
+        "Disagree with a punishment? Open an **Appeal a tier** or **Help** ticket and explain your case."
+    );
+}
+
+// ---------- requests: queue picker, open-a-ticket, tester application ----------
+
+function buildRequestTestEmbed() {
+  return new EmbedBuilder()
+    .setAuthor({ name: "RyftTiers", iconURL: client.user ? client.user.displayAvatarURL() : undefined })
+    .setTitle("Request a Tier Test")
+    .setColor(0xffd54a)
+    .setDescription(
+      "Pick a gamemode below and I'll point you to its queue channel. You'll join the actual queue from there — this is just the signpost.\n\n" +
+        "Make sure you've verified first (`/verify` or the website's Verify tab) — you can't join a queue until you have."
+    );
+}
+
+function buildRequestTestSelect() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("request_test_gamemode")
+      .setPlaceholder("Choose a gamemode...")
+      .addOptions(
+        Object.entries(GAMEMODE_CHANNELS).map(([channelName, gamemode]) => ({
+          label: GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode,
+          value: channelName,
+        }))
+      )
+  );
+}
+
+function buildRequestSupportEmbed() {
+  return new EmbedBuilder()
+    .setAuthor({ name: "RyftTiers", iconURL: client.user ? client.user.displayAvatarURL() : undefined })
+    .setTitle("Support Tickets")
+    .setColor(0x3fa0f5)
+    .setDescription(
+      "Need help, want to report a player, or appeal a tier? Click **Open Ticket** below.\n\n" +
+        "You'll pick a category and fill in a couple of details — a private ticket channel gets created just for you and staff, and it's also mirrored on the website under **Support**."
+    );
+}
+
+function buildOpenTicketButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("request_open_ticket").setLabel("Open Ticket").setStyle(ButtonStyle.Primary)
+  );
+}
+
+function buildTicketCategoryButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_cat_help").setLabel("Help").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket_cat_report").setLabel("Report a player").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("ticket_cat_appeal").setLabel("Appeal a tier").setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function buildTicketModal(category) {
+  const label = { help: "Help", report: "Report a player", appeal: "Appeal a tier" }[category];
+  return new ModalBuilder()
+    .setCustomId(`ticket_modal_${category}`)
+    .setTitle(`New Ticket — ${label}`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("subject")
+          .setLabel("Short summary")
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(100)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("details")
+          .setLabel("Explain what's going on")
+          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(1000)
+          .setRequired(true)
+      )
+    );
+}
+
+function buildTesterApplicationEmbed() {
+  return new EmbedBuilder()
+    .setAuthor({ name: "RyftTiers", iconURL: client.user ? client.user.displayAvatarURL() : undefined })
+    .setTitle("Apply to Become a Tester")
+    .setColor(0x6cc3ff)
+    .setDescription(
+      "Testers run tier tests and keep the queues moving — if you're experienced, reliable, and know the rubric, click **Apply** below.\n\n" +
+        "You'll be asked for your IGN, region, your testing/PvP experience, and your availability. Staff reviews every application — you'll be DM'd either way.\n\n" +
+        "**Please provide authentic information.** A dishonest application will be denied."
+    );
+}
+
+function buildApplyButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("tester_apply").setLabel("Apply").setStyle(ButtonStyle.Success)
+  );
+}
+
+function buildTesterApplicationModal() {
+  return new ModalBuilder()
+    .setCustomId("tester_apply_modal")
+    .setTitle("Tester Application")
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("experience")
+          .setLabel("Your PvP/testing experience")
+          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(1000)
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("availability")
+          .setLabel("Availability (days/times, timezone)")
+          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(500)
+          .setRequired(true)
+      )
+    );
+}
+
+function buildApplicationReviewEmbed(app, statusLine = "") {
+  return new EmbedBuilder()
+    .setTitle("Tester Application")
+    .setColor(statusLine ? (statusLine.includes("Accepted") ? 0x4ade80 : 0xe05a5a) : 0x6cc3ff)
+    .setDescription(
+      `**Applicant:** <@${app.discord_id}>\n` +
+        `**IGN:** ${app.ign}\n` +
+        `**Region:** ${app.region}\n\n` +
+        `**Experience**\n${app.experience}\n\n` +
+        `**Availability**\n${app.availability}` +
+        statusLine
+    );
+}
+
+function buildApplicationReviewButtons(applicationId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`tester_app_accept_${applicationId}`).setLabel("Accept").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`tester_app_deny_${applicationId}`).setLabel("Deny").setStyle(ButtonStyle.Danger)
+  );
+}
+
+// Managers/admins only — granting the Tester role is a bigger call than
+// the tester/manager-or-up checks used elsewhere (canManageCooldowns).
+function canReviewApplications(member) {
+  return (
+    member.roles.cache.some((r) => managerRoleNames.includes(r.name.toLowerCase())) ||
+    member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+    member.permissions.has(PermissionsBitField.Flags.ManageGuild)
+  );
 }
 
 // ---------- website role sync ----------
@@ -775,20 +986,28 @@ client.on("interactionCreate", async (interaction) => {
     }
     const commandsChannel = basicChannelsByName.commands || null;
 
-    // "Testing" category: reference channels (rubric, results) separate from
-    // the per-gamemode queue categories. #testing-rubric gets the rubric
-    // posted automatically the first time it's created.
-    let testingCategory = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === TESTING_CATEGORY_NAME.toLowerCase()
+    // "Tierlist" category: reference channels (rubric, ruleset, punishments,
+    // leaderboard, results) separate from the per-gamemode queue categories.
+    // Migrates an existing "Testing" category from before this was renamed/
+    // expanded, instead of leaving a stray duplicate behind.
+    let tierlistCategory = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === TIERLIST_CATEGORY_NAME.toLowerCase()
     );
-    if (!testingCategory) {
-      testingCategory = await interaction.guild.channels.create({
-        name: TESTING_CATEGORY_NAME,
-        type: ChannelType.GuildCategory,
-      });
+    if (!tierlistCategory) {
+      const oldCategory = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === OLD_TESTING_CATEGORY_NAME.toLowerCase()
+      );
+      if (oldCategory) {
+        tierlistCategory = await oldCategory.setName(TIERLIST_CATEGORY_NAME);
+      } else {
+        tierlistCategory = await interaction.guild.channels.create({
+          name: TIERLIST_CATEGORY_NAME,
+          type: ChannelType.GuildCategory,
+        });
+      }
     }
-    const testingCreated = [];
-    for (const spec of TESTING_CHANNELS) {
+    const tierlistCreated = [];
+    for (const spec of TIERLIST_CHANNELS) {
       let channel = interaction.guild.channels.cache.find(
         (c) => c.type === ChannelType.GuildText && c.name === spec.name
       );
@@ -797,16 +1016,87 @@ client.on("interactionCreate", async (interaction) => {
         channel = await interaction.guild.channels.create({
           name: spec.name,
           type: ChannelType.GuildText,
-          parent: testingCategory.id,
+          parent: tierlistCategory.id,
         });
-        testingCreated.push(spec.name);
+        tierlistCreated.push(spec.name);
         justCreated = true;
-      } else if (channel.parentId !== testingCategory.id) {
-        await channel.setParent(testingCategory.id, { lockPermissions: false }).catch(() => {});
+      } else if (channel.parentId !== tierlistCategory.id) {
+        await channel.setParent(tierlistCategory.id, { lockPermissions: false }).catch(() => {});
       }
-      if (spec.name === "testing-rubric" && justCreated) {
-        await channel.send({ embeds: [buildTestingRubricEmbed()] }).catch(() => {});
+      if (justCreated) {
+        if (spec.name === "ranked-rubric") await channel.send({ embeds: [buildTestingRubricEmbed()] }).catch(() => {});
+        if (spec.name === "ranked-ruleset") await channel.send({ embeds: [buildTestingRulesetEmbed()] }).catch(() => {});
+        if (spec.name === "punishments") await channel.send({ embeds: [buildPunishmentsEmbed()] }).catch(() => {});
       }
+    }
+
+    // "Requests" category: public read-only entry points (queue picker,
+    // open-a-ticket, tester application) — each posts its embed/button(s)
+    // once, the first time that channel is created.
+    let requestsCategory = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === REQUESTS_CATEGORY_NAME.toLowerCase()
+    );
+    if (!requestsCategory) {
+      requestsCategory = await interaction.guild.channels.create({
+        name: REQUESTS_CATEGORY_NAME,
+        type: ChannelType.GuildCategory,
+      });
+    }
+    const requestsCreated = [];
+    const requestChannelSpecs = [
+      { name: REQUEST_TEST_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestTestEmbed()], components: [buildRequestTestSelect()] }) },
+      { name: REQUEST_SUPPORT_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestSupportEmbed()], components: [buildOpenTicketButton()] }) },
+      { name: TESTER_APPLICATION_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildTesterApplicationEmbed()], components: [buildApplyButton()] }) },
+    ];
+    for (const spec of requestChannelSpecs) {
+      let channel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === spec.name
+      );
+      let justCreated = false;
+      if (!channel) {
+        channel = await interaction.guild.channels.create({
+          name: spec.name,
+          type: ChannelType.GuildText,
+          parent: requestsCategory.id,
+        });
+        requestsCreated.push(spec.name);
+        justCreated = true;
+      } else if (channel.parentId !== requestsCategory.id) {
+        await channel.setParent(requestsCategory.id, { lockPermissions: false }).catch(() => {});
+      }
+      // Read-only, same as tiertest channels — interact via the posted
+      // button/select menu, not by typing.
+      await lockChannelToTesters(interaction.guild, channel);
+      if (justCreated) await spec.post(channel).catch(() => {});
+    }
+
+    // "Staff" category: private review channel for tester applications.
+    let staffCategory = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === STAFF_CATEGORY_NAME.toLowerCase()
+    );
+    if (!staffCategory) {
+      const overwrites = [{ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] }];
+      for (const roleId of [PERMISSION_ROLE_IDS.manager, PERMISSION_ROLE_IDS.moderator, PERMISSION_ROLE_IDS.owner]) {
+        if (roleId) overwrites.push({ id: roleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] });
+      }
+      staffCategory = await interaction.guild.channels.create({
+        name: STAFF_CATEGORY_NAME,
+        type: ChannelType.GuildCategory,
+        permissionOverwrites: overwrites,
+      });
+    }
+    let reviewChannel = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
+    );
+    if (!reviewChannel) {
+      reviewChannel = await interaction.guild.channels.create({
+        name: TESTER_APP_REVIEW_CHANNEL_NAME,
+        type: ChannelType.GuildText,
+        parent: staffCategory.id,
+      });
+      requestsCreated.push(TESTER_APP_REVIEW_CHANNEL_NAME);
+    } else if (reviewChannel.parentId !== staffCategory.id) {
+      await reviewChannel.setParent(staffCategory.id, { lockPermissions: false }).catch(() => {});
     }
 
     // Delete Discord's default starter channels — replaced by the above.
@@ -889,7 +1179,8 @@ client.on("interactionCreate", async (interaction) => {
     if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
     if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
     if (basicCreated.length) lines.push(`**Basic channels created:** ${basicCreated.map((n) => `#${n}`).join(", ")}`);
-    if (testingCreated.length) lines.push(`**Testing channels created:** ${testingCreated.map((n) => `#${n}`).join(", ")}`);
+    if (tierlistCreated.length) lines.push(`**Tierlist channels created:** ${tierlistCreated.map((n) => `#${n}`).join(", ")}`);
+    if (requestsCreated.length) lines.push(`**Requests/Staff channels created:** ${requestsCreated.map((n) => `#${n}`).join(", ")}`);
     if (deleted.length) lines.push(`**Deleted:** ${deleted.join(", ")}`);
     if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
@@ -1281,6 +1572,69 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---------- buttons ----------
   if (interaction.isButton()) {
+    // ---------- #request-support: open a ticket ----------
+    if (interaction.customId === "request_open_ticket") {
+      return interaction.reply({
+        content: "What's this about?",
+        components: [buildTicketCategoryButtons()],
+        ephemeral: true,
+      });
+    }
+
+    if (interaction.customId.startsWith("ticket_cat_")) {
+      const category = interaction.customId.replace("ticket_cat_", "");
+      return interaction.showModal(buildTicketModal(category));
+    }
+
+    // ---------- #tester-application ----------
+    if (interaction.customId === "tester_apply") {
+      return interaction.showModal(buildTesterApplicationModal());
+    }
+
+    if (interaction.customId.startsWith("tester_app_accept_") || interaction.customId.startsWith("tester_app_deny_")) {
+      if (!canReviewApplications(interaction.member)) {
+        return interaction.reply({ content: "Only managers/admins can review applications.", ephemeral: true });
+      }
+      const accept = interaction.customId.startsWith("tester_app_accept_");
+      const applicationId = Number(interaction.customId.split("_").pop());
+      await interaction.deferUpdate();
+
+      const decided = await decideTesterApplication(applicationId, accept ? "accepted" : "denied", interaction.user.id);
+      if (!decided) {
+        return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
+      }
+
+      const app = await getTesterApplication(applicationId);
+      const statusLine = `\n\n${accept ? "✅ **Accepted**" : "❌ **Denied**"} by <@${interaction.user.id}>`;
+      await interaction.message
+        .edit({ embeds: [buildApplicationReviewEmbed(app, statusLine)], components: [] })
+        .catch(() => {});
+
+      if (accept) {
+        try {
+          const member = await interaction.guild.members.fetch(app.discord_id);
+          const testerRole = interaction.guild.roles.cache.get(PERMISSION_ROLE_IDS.tester);
+          if (testerRole) await member.roles.add(testerRole).catch(() => {});
+        } catch (err) {
+          console.error("Couldn't add Tester role after accepting application:", err.message);
+        }
+      }
+
+      try {
+        const applicant = await client.users.fetch(app.discord_id);
+        await applicant
+          .send(
+            accept
+              ? "🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role."
+              : "Your tester application for RyftTiers was **denied**. You're welcome to apply again in the future."
+          )
+          .catch(() => {});
+      } catch (err) {
+        console.error("Couldn't DM applicant:", err.message);
+      }
+      return;
+    }
+
     // Ticket-only buttons (submit / close) work in ticket channels, which
     // aren't in GAMEMODE_CHANNELS, so handle those before the gamemode check.
     if (interaction.customId.startsWith("ticket_submit_")) {
@@ -1636,7 +1990,69 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
+  // ---------- #request-test: gamemode picker ----------
+  if (interaction.isStringSelectMenu() && interaction.customId === "request_test_gamemode") {
+    const channelName = interaction.values[0];
+    const gamemode = GAMEMODE_CHANNELS[channelName];
+    const channel = interaction.guild.channels.cache.find((c) => c.name === channelName);
+    if (!gamemode || !channel) {
+      return interaction.reply({ content: "Couldn't find that queue channel — ask staff to run /setupqueues.", ephemeral: true });
+    }
+    return interaction.reply({
+      content: `Head to ${channel} and use the **Join Queue** button there once it's open.`,
+      ephemeral: true,
+    });
+  }
+
   // ---------- modal submit ----------
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal_")) {
+    const category = interaction.customId.replace("ticket_modal_", "");
+    const subject = interaction.fields.getTextInputValue("subject").trim();
+    const details = interaction.fields.getTextInputValue("details").trim();
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      await createSupportTicketFromDiscord(
+        interaction.user.id,
+        interaction.member?.displayName || interaction.user.username,
+        category,
+        subject,
+        details
+      );
+      return interaction.editReply({
+        content: "Ticket created — a private channel for it will appear here shortly, and it's on the website under Support too.",
+      });
+    } catch (err) {
+      console.error("Couldn't create ticket from Discord:", err.message);
+      return interaction.editReply({ content: "Something went wrong creating that ticket. Try again or ping staff." });
+    }
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === "tester_apply_modal") {
+    const ign = interaction.fields.getTextInputValue("ign").trim();
+    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
+    const experience = interaction.fields.getTextInputValue("experience").trim();
+    const availability = interaction.fields.getTextInputValue("availability").trim();
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const applicationId = await createTesterApplication(interaction.user.id, { ign, region, experience, availability });
+      const reviewChannel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
+      );
+      if (reviewChannel) {
+        const app = await getTesterApplication(applicationId);
+        const reviewMsg = await reviewChannel.send({
+          embeds: [buildApplicationReviewEmbed(app)],
+          components: [buildApplicationReviewButtons(applicationId)],
+        });
+        await setTesterApplicationReviewMessage(applicationId, reviewChannel.id, reviewMsg.id);
+      }
+      return interaction.editReply({ content: "Application submitted! Staff will review it and DM you either way." });
+    } catch (err) {
+      console.error("Couldn't submit tester application:", err.message);
+      return interaction.editReply({ content: "Something went wrong submitting that. Try again or ping staff." });
+    }
+  }
+
   if (interaction.isModalSubmit() && interaction.customId.startsWith("submit_result_")) {
     const [, , gamemode, testeeId] = interaction.customId.split("_");
     const region = interaction.fields.getTextInputValue("player_region").trim().toUpperCase();
