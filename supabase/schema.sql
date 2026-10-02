@@ -448,7 +448,127 @@ grant execute on function join_queue, leave_queue, join_testing, leave_testing,
   to authenticated;
 
 -- ============================================================
--- 9. REALTIME — so the Queues/Results subtabs update live for everyone
+-- 9. SUPPORT TICKETS (help / report / appeal) — mirrored to Discord
+--    by the bot, which listens for new rows via Realtime and posts a
+--    "<discord username>-ticket" channel; it also mirrors messages both
+--    ways. The web app never talks to Discord directly.
+-- ============================================================
+
+create table if not exists support_tickets (
+  id bigint generated always as identity primary key,
+  player_id bigint not null references players(id) on delete cascade,
+  category text not null check (category in ('help', 'report', 'appeal')),
+  subject text not null,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  discord_channel_id text,
+  created_at timestamptz not null default now(),
+  closed_at timestamptz
+);
+
+create table if not exists support_messages (
+  id bigint generated always as identity primary key,
+  ticket_id bigint not null references support_tickets(id) on delete cascade,
+  author_player_id bigint references players(id),
+  author_label text,
+  source text not null check (source in ('website', 'discord')),
+  content text not null,
+  created_at timestamptz not null default now()
+);
+
+alter table support_tickets enable row level security;
+alter table support_messages enable row level security;
+
+drop policy if exists "own or staff" on support_tickets;
+create policy "own or staff" on support_tickets for select using (
+  player_id = current_player_id() or current_is_moderator() or current_is_owner()
+);
+
+drop policy if exists "own or staff" on support_messages;
+create policy "own or staff" on support_messages for select using (
+  exists (
+    select 1 from support_tickets t
+    where t.id = ticket_id
+      and (t.player_id = current_player_id() or current_is_moderator() or current_is_owner())
+  )
+);
+
+-- Creates a ticket plus its first message in one go; returns the new ticket id.
+create or replace function create_support_ticket(p_category text, p_subject text, p_message text)
+returns bigint
+language plpgsql
+security definer
+as $$
+declare
+  v_player_id bigint := current_player_id();
+  v_ticket_id bigint;
+begin
+  if v_player_id is null then
+    raise exception 'not logged in';
+  end if;
+  if p_category not in ('help', 'report', 'appeal') then
+    raise exception 'invalid category';
+  end if;
+
+  insert into support_tickets (player_id, category, subject)
+  values (v_player_id, p_category, p_subject)
+  returning id into v_ticket_id;
+
+  insert into support_messages (ticket_id, author_player_id, source, content)
+  values (v_ticket_id, v_player_id, 'website', p_message);
+
+  return v_ticket_id;
+end;
+$$;
+
+create or replace function send_support_message(p_ticket_id bigint, p_content text)
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_player_id bigint := current_player_id();
+  v_ticket record;
+begin
+  select * into v_ticket from support_tickets where id = p_ticket_id;
+  if v_ticket is null then
+    raise exception 'ticket not found';
+  end if;
+  if v_ticket.player_id != v_player_id and not current_is_moderator() and not current_is_owner() then
+    raise exception 'not allowed';
+  end if;
+
+  insert into support_messages (ticket_id, author_player_id, source, content)
+  values (p_ticket_id, v_player_id, 'website', p_content);
+end;
+$$;
+
+create or replace function close_support_ticket(p_ticket_id bigint)
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_player_id bigint := current_player_id();
+  v_ticket record;
+begin
+  select * into v_ticket from support_tickets where id = p_ticket_id;
+  if v_ticket is null then
+    raise exception 'ticket not found';
+  end if;
+  if v_ticket.player_id != v_player_id and not current_is_moderator() and not current_is_owner() then
+    raise exception 'not allowed';
+  end if;
+
+  update support_tickets set status = 'closed', closed_at = now() where id = p_ticket_id;
+end;
+$$;
+
+revoke all on function create_support_ticket, send_support_message, close_support_ticket from public;
+grant execute on function create_support_ticket, send_support_message, close_support_ticket to authenticated;
+
+-- ============================================================
+-- 10. REALTIME — so the Queues/Results/Support subtabs update live for
+--     everyone, and so the bot can react to new tickets/messages
 -- ============================================================
 
 alter publication supabase_realtime add table queue_entries;
@@ -456,3 +576,5 @@ alter publication supabase_realtime add table queue_testers;
 alter publication supabase_realtime add table queue_closed;
 alter publication supabase_realtime add table live_tests;
 alter publication supabase_realtime add table test_log;
+alter publication supabase_realtime add table support_tickets;
+alter publication supabase_realtime add table support_messages;
