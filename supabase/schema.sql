@@ -59,9 +59,16 @@ create table if not exists live_tests (
   player_id bigint not null references players(id) on delete cascade,
   gamemode text not null,
   region text,
-  tester_id bigint not null references players(id) on delete cascade,
+  tester_id bigint references players(id) on delete cascade,
+  tester_names text[],                 -- display names of everyone co-testing (Discord-side, for the website)
+  discord_ticket_channel_id text,      -- set when this test is happening in a Discord ticket
   started_at timestamptz not null default now()
 );
+
+-- Safe to re-run against a live_tests table created before these existed.
+alter table live_tests alter column tester_id drop not null;
+alter table live_tests add column if not exists tester_names text[];
+alter table live_tests add column if not exists discord_ticket_channel_id text;
 
 create table if not exists test_log (
   id bigint generated always as identity primary key,
@@ -70,9 +77,16 @@ create table if not exists test_log (
   tier text not null,
   previous_tier text,
   tester_id bigint references players(id) on delete set null,
+  tester_names text[],  -- display names of everyone who tested (co-testing), for the website
   region text,
   created_at timestamptz not null default now()
 );
+
+alter table test_log add column if not exists tester_names text[];
+-- Lets /backfilllogs re-run safely without creating duplicate entries.
+alter table test_log add column if not exists discord_message_id text;
+create unique index if not exists test_log_discord_message_id_key
+  on test_log (discord_message_id) where discord_message_id is not null;
 
 -- One row per logged-in Discord account. Links auth.users -> players,
 -- and caches the Tester/Manager role check so we don't hit Discord's API
@@ -407,8 +421,12 @@ begin
   values (v_live.player_id, v_live.gamemode, p_tier, now())
   on conflict (player_id, gamemode) do update set tier = excluded.tier, updated_at = now();
 
-  insert into test_log (player_id, gamemode, tier, previous_tier, tester_id, region)
-  values (v_live.player_id, v_live.gamemode, p_tier, v_previous_tier, v_live.tester_id, v_live.region);
+  insert into test_log (player_id, gamemode, tier, previous_tier, tester_id, tester_names, region)
+  values (
+    v_live.player_id, v_live.gamemode, p_tier, v_previous_tier, v_live.tester_id,
+    coalesce(v_live.tester_names, array[(select username from players where id = v_live.tester_id)]),
+    v_live.region
+  );
 
   insert into cooldowns (player_id, gamemode, until)
   values (v_live.player_id, v_live.gamemode, now() + interval '3 days')

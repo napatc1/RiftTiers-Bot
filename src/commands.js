@@ -57,6 +57,12 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("postverifyinfo")
+    .setDescription(
+      "Post step-by-step account-linking instructions to the verify-info channel."
+    ),
+
+  new SlashCommandBuilder()
     .setName("posthighqueue")
     .setDescription(
       "Post a HIGH tier-test queue (LT3 and above only) in this channel."
