@@ -130,6 +130,45 @@ function getTesterRoles(guild) {
   );
 }
 
+function getManagerRoles(guild) {
+  return guild.roles.cache.filter((r) =>
+    managerRoleNames.includes(r.name.toLowerCase())
+  );
+}
+
+// Every role that should be able to type in a tiertest channel: testers,
+// senior testers, managers, moderators, owners (by the fixed permission IDs
+// in config.js, when that role exists on this server) plus anything matched
+// by name via TESTER_ROLE_NAMES/MANAGER_ROLE_NAMES, plus the bot's own
+// role(s) so it can keep posting queue messages once @everyone is denied.
+function testerAndUpRoleIds(guild) {
+  const ids = new Set();
+  for (const roleId of Object.values(PERMISSION_ROLE_IDS)) {
+    if (roleId && guild.roles.cache.has(roleId)) ids.add(roleId);
+  }
+  for (const role of getTesterRoles(guild).values()) ids.add(role.id);
+  for (const role of getManagerRoles(guild).values()) ids.add(role.id);
+  const botMember = guild.members.me;
+  if (botMember) {
+    for (const role of botMember.roles.cache.values()) {
+      if (role.id !== guild.roles.everyone.id) ids.add(role.id);
+    }
+  }
+  return ids;
+}
+
+// Locks a tiertest channel down to read-only for everyone except
+// testers/managers/mods/owners (and the bot) — players can still see the
+// queue and use the buttons, they just can't type in it.
+async function lockChannelToTesters(guild, channel) {
+  await channel.permissionOverwrites
+    .edit(guild.roles.everyone.id, { SendMessages: false })
+    .catch(() => {});
+  for (const roleId of testerAndUpRoleIds(guild)) {
+    await channel.permissionOverwrites.edit(roleId, { SendMessages: true }).catch(() => {});
+  }
+}
+
 // @everyone only actually pings when it's in a message's plain content, not
 // inside an embed, so this is sent as a normal message rather than an
 // embed. commandsChannel is a Channel object (or null, if #commands
@@ -147,6 +186,8 @@ If no testers are available, the queue card here will show **No Testers Online**
 
 After a tester has marked themselves as unavailable with no other testers active, the queue will be closed. If you were in the queue, your queue position will not be saved. You can still enter the queue again like normal whenever a tester becomes available.
 
+
+This channel is read-only — use the buttons to join/leave, and chat in ${commandsMention} instead.
 
 If you decide you no longer want to be tested, use \`/leave\` in the ${commandsMention} channel.`;
 }
@@ -775,6 +816,11 @@ client.on("interactionCreate", async (interaction) => {
       } else if (channel.parentId !== category.id) {
         await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
       }
+
+      // Tiertest channels are read-only for everyone except testers and up —
+      // re-applied every run so it also catches channels set up before this
+      // existed.
+      await lockChannelToTesters(interaction.guild, channel);
 
       const existingMsgInfo = getQueueMessage(gamemode);
       if (existingMsgInfo) {
@@ -1659,6 +1705,21 @@ client.once("ready", async () => {
     await initRealtimeSync(guild);
   } catch (err) {
     console.error("[realtime-sync] failed to start:", err.message);
+  }
+
+  // Lock down every known tiertest channel to testers-and-up on boot, so
+  // this takes effect right away without needing a /setupqueues re-run.
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    for (const channelName of Object.keys(GAMEMODE_CHANNELS)) {
+      const channel = guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === channelName
+      );
+      if (channel) await lockChannelToTesters(guild, channel);
+    }
+    console.log("[startup] tiertest channels locked to testers-and-up");
+  } catch (err) {
+    console.error("[startup] failed to lock tiertest channels:", err.message);
   }
 });
 
