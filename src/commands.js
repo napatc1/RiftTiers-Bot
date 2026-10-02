@@ -8,13 +8,6 @@ const commands = [
     .setName("postqueue")
     .setDescription(
       "Post the tier-test queue message in this channel (run once per channel)."
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("region")
-        .setDescription("Which region's servers you'll be testing on")
-        .setRequired(true)
-        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 
   new SlashCommandBuilder()
@@ -60,13 +53,6 @@ const commands = [
     .setName("setupqueues")
     .setDescription(
       "One-time setup: creates missing gamemode/tier roles and tiertest channels, posts queues."
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("region")
-        .setDescription("Region to set on any queue this creates (you can change it later with /postqueue)")
-        .setRequired(true)
-        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 
   new SlashCommandBuilder()
@@ -79,13 +65,6 @@ const commands = [
     .setName("posthighqueue")
     .setDescription(
       "Post a HIGH tier-test queue (LT3 and above only) in this channel."
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("region")
-        .setDescription("Which region's servers you'll be testing on")
-        .setRequired(true)
-        .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
 
   new SlashCommandBuilder()

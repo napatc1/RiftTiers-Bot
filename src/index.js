@@ -485,15 +485,15 @@ function getRolePing(guild, gamemode) {
   return role ? `<@&${role.id}> ` : "";
 }
 
-// Warns a player if their stored region doesn't match the region a tester
-// picked for this queue session. Non-blocking — they can still join.
+// Warns a player if their stored region doesn't match the tester's region.
+// Non-blocking — they can still join, but they need to be aware.
 async function regionMismatchWarning(discordUserId, queueRegion) {
   if (!queueRegion) return "";
   const username = await getVerifiedUsername(discordUserId);
   if (!username) return "";
   const player = await getPlayer(username);
   if (!player || !player.region || player.region === queueRegion) return "";
-  return `\n\n⚠️ If you join this queue, the tester will only allow you to test on **${queueRegion}** servers.`;
+  return `\n\n⚠️ **Region mismatch!** The tester is hosting on **${queueRegion}** servers. You must be able to play on **${queueRegion}** — if you can't, leave the queue now.`;
 }
 
 // queueKey is the gamemode id ("vanilla") for a normal queue, or
@@ -878,8 +878,6 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
     await addQueueTester(gamemode, interaction.user.id);
-    const queueRegion = interaction.options.getString("region", true);
-    await setQueueRegion(gamemode, queueRegion);
     await setQueueClosed(gamemode, false);
     await setQueueLocked(gamemode, false);
     await interaction.reply({ content: "Queue posted below.", ephemeral: true });
@@ -910,7 +908,6 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     await interaction.deferReply({ ephemeral: true });
-    const region = interaction.options.getString("region", true);
 
     // Ping roles first — channels below ping them immediately once posted.
     const rolesCreated = [];
@@ -1168,7 +1165,6 @@ client.on("interactionCreate", async (interaction) => {
       // New queues start CLOSED — staff open them explicitly (the Open
       // Queue button or /postqueue) when they're actually ready to test. No
       // ping here since there's nothing to join yet.
-      await setQueueRegion(gamemode, region);
       await setQueueClosed(gamemode, true);
       await setQueueLocked(gamemode, false);
       await postFreshQueueMessage(channel, gamemode, gamemode);
@@ -1457,8 +1453,6 @@ client.on("interactionCreate", async (interaction) => {
     }
     const highKey = `${gamemode}:high`;
     await addQueueTester(highKey, interaction.user.id);
-    const highQueueRegion = interaction.options.getString("region", true);
-    await setQueueRegion(highKey, highQueueRegion);
     await setQueueClosed(highKey, false);
     await setQueueLocked(highKey, false);
     await interaction.reply({ content: "High queue posted below.", ephemeral: true });
@@ -1731,19 +1725,30 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Closed -> open. Deletes the closed card and posts a fresh open one
-    // with the role ping baked into the same message's content.
+    // Closed -> open. Shows a region picker modal first; the actual open
+    // happens when the modal is submitted (modal id: queue_open_modal).
     if (interaction.customId === "queue_open") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      await interaction.reply({ content: "Opening the queue.", ephemeral: true });
-      await setQueueClosed(gamemode, false);
-      await setQueueLocked(gamemode, false);
-      await postFreshQueueMessage(interaction.channel, gamemode, gamemode, {
-        content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
-      });
-      return;
+      const currentRegion = await getQueueRegion(gamemode);
+      const modal = new ModalBuilder()
+        .setCustomId(`queue_open_modal:${gamemode}`)
+        .setTitle("Open Queue — Select Region");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("region")
+            .setLabel("Region (NA / EU / AS / ME / AU)")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("NA")
+            .setValue(currentRegion || "")
+            .setRequired(true)
+            .setMinLength(2)
+            .setMaxLength(2)
+        )
+      );
+      return interaction.showModal(modal);
     }
 
     // Open queue, stays open/visible, just stops new joins — distinct from
@@ -1893,14 +1898,24 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
       const highKey = `${gamemode}:high`;
-      await interaction.reply({ content: "Opening the high queue.", ephemeral: true });
-      await setQueueClosed(highKey, false);
-      await setQueueLocked(highKey, false);
-      await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
-        isHigh: true,
-        content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
-      });
-      return;
+      const currentRegion = await getQueueRegion(highKey);
+      const modal = new ModalBuilder()
+        .setCustomId(`highqueue_open_modal:${gamemode}`)
+        .setTitle("Open High Queue — Select Region");
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("region")
+            .setLabel("Region (NA / EU / AS / ME / AU)")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("NA")
+            .setValue(currentRegion || "")
+            .setRequired(true)
+            .setMinLength(2)
+            .setMaxLength(2)
+        )
+      );
+      return interaction.showModal(modal);
     }
 
     if (interaction.customId === "highqueue_toggle_lock") {
@@ -2005,6 +2020,45 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ---------- modal submit ----------
+
+  // Tester clicked "Open Queue" → chose a region → submit
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("queue_open_modal:")) {
+    const gamemode = interaction.customId.split(":")[1];
+    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
+    if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
+      return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
+    }
+    await interaction.reply({ content: `Opening the queue on **${region}** servers.`, ephemeral: true });
+    const channel = interaction.channel;
+    await setQueueRegion(gamemode, region);
+    await setQueueClosed(gamemode, false);
+    await setQueueLocked(gamemode, false);
+    await postFreshQueueMessage(channel, gamemode, gamemode, {
+      content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
+    });
+    return;
+  }
+
+  // Tester clicked "Open Queue" on the HIGH queue → chose a region → submit
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("highqueue_open_modal:")) {
+    const gamemode = interaction.customId.split(":")[1];
+    const highKey = `${gamemode}:high`;
+    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
+    if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
+      return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
+    }
+    await interaction.reply({ content: `Opening the high queue on **${region}** servers.`, ephemeral: true });
+    const channel = interaction.channel;
+    await setQueueRegion(highKey, region);
+    await setQueueClosed(highKey, false);
+    await setQueueLocked(highKey, false);
+    await postFreshQueueMessage(channel, highKey, gamemode, {
+      isHigh: true,
+      content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
+    });
+    return;
+  }
+
   if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal_")) {
     const category = interaction.customId.replace("ticket_modal_", "");
     const subject = interaction.fields.getTextInputValue("subject").trim();
