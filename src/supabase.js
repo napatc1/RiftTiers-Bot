@@ -409,9 +409,31 @@ function getQueueMessage(queueKey) {
   return queueMessages.get(queueKey) || null;
 }
 
+// ---------- role sync ----------
+
+// Writes website permission flags onto an existing `profiles` row, keyed by
+// discord_id. Does nothing if the player hasn't logged into the website yet
+// (no profiles row exists) — handle_new_user() creates that row the moment
+// they first sign in with Discord, and the next sync pass picks them up.
+async function syncProfileRoles(discordId, flags) {
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      is_tester: flags.isTester,
+      is_senior_tester: flags.isSeniorTester,
+      is_manager: flags.isManager,
+      is_moderator: flags.isModerator,
+      is_owner: flags.isOwner,
+      roles_synced_at: new Date().toISOString(),
+    })
+    .eq("discord_id", discordId);
+  if (error) console.error("[roles] syncProfileRoles error:", error.message);
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
+  syncProfileRoles,
   getPlayerRowByUsername,
   setPlayerTier,
   getPlayer,

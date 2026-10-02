@@ -32,6 +32,17 @@ const ROLE_PING_IDS = {
   cart: "1545385591426781244",
 };
 
+// Discord role IDs that grant website permissions. Kept separate from the
+// gamemode ping roles above. The bot syncs these onto each player's
+// `profiles` row in Supabase so the website knows who can do what.
+const PERMISSION_ROLE_IDS = {
+  manager: "1555515918069530664",
+  seniorTester: "1555516077666996325",
+  tester: "1555516030082879569",
+  moderator: "1555516390822252654",
+  owner: "1555516243388399636",
+};
+
 // Tiers a tester can assign, best to worst. Matches tiers.js on the website.
 const TIER_OPTIONS = [
   "HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5",
@@ -41,4 +52,4 @@ const TIER_OPTIONS = [
 // again for the same gamemode.
 const COOLDOWN_DAYS = 3;
 
-module.exports = { GAMEMODE_CHANNELS, GAMEMODES, ROLE_PING_IDS, TIER_OPTIONS, COOLDOWN_DAYS };
+module.exports = { GAMEMODE_CHANNELS, GAMEMODES, ROLE_PING_IDS, PERMISSION_ROLE_IDS, TIER_OPTIONS, COOLDOWN_DAYS };

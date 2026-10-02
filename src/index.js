@@ -13,9 +13,10 @@ const {
   PermissionsBitField,
   ChannelType,
 } = require("discord.js");
-const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_IDS } = require("./config");
+const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_IDS, PERMISSION_ROLE_IDS } = require("./config");
 const {
   supabase,
+  syncProfileRoles,
   getPlayerRowByUsername,
   setPlayerTier,
   getPlayer,
@@ -96,6 +97,40 @@ function getTesterRoles(guild) {
   return guild.roles.cache.filter((r) =>
     testerRoleNames.includes(r.name.toLowerCase())
   );
+}
+
+// ---------- website role sync ----------
+// Keeps each player's `profiles` row in Supabase in sync with their Discord
+// roles, so the website knows who's a tester/senior tester/manager/
+// moderator/owner. Runs on startup, on every role change, and on a timer as
+// a safety net for people who log into the website after roles were synced.
+
+function computeRoleFlags(member) {
+  const has = (roleId) => member.roles.cache.has(roleId);
+  const isSeniorTester = has(PERMISSION_ROLE_IDS.seniorTester);
+  return {
+    isTester: isSeniorTester || has(PERMISSION_ROLE_IDS.tester),
+    isSeniorTester,
+    isManager: has(PERMISSION_ROLE_IDS.manager),
+    isModerator: has(PERMISSION_ROLE_IDS.moderator),
+    isOwner: has(PERMISSION_ROLE_IDS.owner),
+  };
+}
+
+async function syncMemberRoles(member) {
+  if (!member || member.user?.bot) return;
+  try {
+    await syncProfileRoles(member.id, computeRoleFlags(member));
+  } catch (err) {
+    console.error(`[roles] failed to sync ${member.id}:`, err.message);
+  }
+}
+
+async function syncAllGuildMemberRoles(guild) {
+  const members = await guild.members.fetch();
+  for (const member of members.values()) {
+    await syncMemberRoles(member);
+  }
 }
 
 // A player must already be tiered LT3 or better (index <= this) in the
@@ -1226,8 +1261,33 @@ client.on("interactionCreate", async (interaction) => {
  }
 });
 
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  const guildId = process.env.DISCORD_GUILD_ID;
+  if (!guildId) {
+    console.warn("[roles] DISCORD_GUILD_ID not set, skipping role sync.");
+    return;
+  }
+
+  const runSync = async () => {
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      await syncAllGuildMemberRoles(guild);
+      console.log("[roles] guild role sync complete");
+    } catch (err) {
+      console.error("[roles] guild role sync failed:", err.message);
+    }
+  };
+
+  await runSync();
+  setInterval(runSync, 10 * 60 * 1000); // safety-net resync every 10 min
+});
+
+// Fires whenever a member's roles (or anything else) change — keeps the
+// website's permission flags current the moment staff are promoted/demoted.
+client.on("guildMemberUpdate", (_oldMember, newMember) => {
+  syncMemberRoles(newMember);
 });
 
 // Catch anything that slips through interaction handling so a single bad
