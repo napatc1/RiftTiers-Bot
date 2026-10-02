@@ -23,9 +23,9 @@ const {
   COOLDOWN_DAYS,
   GAMEMODE_PING_ROLE_NAMES,
   PERMISSION_ROLE_IDS,
-  QUEUES_CATEGORY_NAME,
   SUPPORT_CATEGORY_NAME,
   tierRoleName,
+  queueCategoryName,
 } = require("./config");
 const {
   supabase,
@@ -532,21 +532,24 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
-    let category = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === QUEUES_CATEGORY_NAME.toLowerCase()
-    );
-    if (!category) {
-      category = await interaction.guild.channels.create({
-        name: QUEUES_CATEGORY_NAME,
-        type: ChannelType.GuildCategory,
-      });
-    }
-
     const created = [];
+    const categoriesCreated = [];
     const posted = [];
     const skipped = [];
 
     for (const [channelName, gamemode] of Object.entries(GAMEMODE_CHANNELS)) {
+      const categoryName = queueCategoryName(gamemode);
+      let category = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
+      );
+      if (!category) {
+        category = await interaction.guild.channels.create({
+          name: categoryName,
+          type: ChannelType.GuildCategory,
+        });
+        categoriesCreated.push(categoryName);
+      }
+
       let channel = interaction.guild.channels.cache.find(
         (c) => c.type === ChannelType.GuildText && c.name === channelName
       );
@@ -557,6 +560,8 @@ client.on("interactionCreate", async (interaction) => {
           parent: category.id,
         });
         created.push(channelName);
+      } else if (channel.parentId !== category.id) {
+        await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
       }
 
       const existingMsgInfo = getQueueMessage(gamemode);
@@ -578,6 +583,7 @@ client.on("interactionCreate", async (interaction) => {
     const lines = [];
     if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
     if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
+    if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
     if (posted.length) lines.push(`**Posted a queue in:** ${posted.join(", ")}`);
     if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);

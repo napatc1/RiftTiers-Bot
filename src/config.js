@@ -55,8 +55,9 @@ const TIER_OPTIONS = [
 const COOLDOWN_DAYS = 3;
 
 // Category names /setupqueues and the realtime sync organize channels
-// under. Matched by name, same as the ping/tier roles above.
-const QUEUES_CATEGORY_NAME = "Queues";
+// under. Matched by name, same as the ping/tier roles above. Each gamemode
+// gets its own category (e.g. "UHC Test") rather than sharing one, via
+// queueCategoryName() below.
 const SUPPORT_CATEGORY_NAME = "Support Tickets";
 
 // Builds the Discord role name for a (gamemode, tier) pair, e.g.
@@ -68,6 +69,14 @@ function tierRoleName(gamemode, tier) {
   return `${display} ${tier}`;
 }
 
+// Builds the per-gamemode category name its queue channel lives under, e.g.
+// queueCategoryName("uhc") -> "UHC Test", queueCategoryName("vanilla") ->
+// "Crystal Test".
+function queueCategoryName(gamemode) {
+  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+  return `${display} Test`;
+}
+
 module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
@@ -75,7 +84,7 @@ module.exports = {
   PERMISSION_ROLE_IDS,
   TIER_OPTIONS,
   COOLDOWN_DAYS,
-  QUEUES_CATEGORY_NAME,
   SUPPORT_CATEGORY_NAME,
   tierRoleName,
+  queueCategoryName,
 };
