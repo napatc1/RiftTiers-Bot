@@ -1,4 +1,4 @@
--- RiftTiers Supabase schema
+-- RyftTiers Supabase schema
 -- Run this whole file once in Supabase: Dashboard -> SQL Editor -> New query -> paste -> Run.
 -- Safe to re-run: everything uses IF NOT EXISTS / CREATE OR REPLACE / ON CONFLICT.
 

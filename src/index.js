@@ -153,10 +153,10 @@ If you decide you no longer want to be tested, use \`/leave\` in the ${commandsM
 
 function buildVerifyInfoEmbed() {
   return new EmbedBuilder()
-    .setTitle("Link your account to RiftTiers")
+    .setTitle("Link your account to RyftTiers")
     .setDescription(
       "Linking takes two quick steps — one on the website, one with the bot.\n\n" +
-        "**1. Log into the website**\nOpen the RiftTiers website and click **Login with Discord** in the top-right corner. Once you're logged in you can join queues, open a Support ticket, and (if you're a tester) claim tests and submit results, right from the site.\n\n" +
+        "**1. Log into the website**\nOpen the RyftTiers website and click **Login with Discord** in the top-right corner. Once you're logged in you can join queues, open a Support ticket, and (if you're a tester) claim tests and submit results, right from the site.\n\n" +
         "**2. Link your Minecraft username**\nIn any channel here, run:\n```/verify username:<your IGN> platform:<Bedrock/Premium/Cracked>```\nThis tells the bot which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
         "Once both are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
     )
@@ -285,7 +285,7 @@ function absoluteTimestamp(isoString) {
 function queueAuthor(gamemode) {
   const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
   return {
-    name: `RiftTiers — ${display} Tier Test`,
+    name: `RyftTiers — ${display} Tier Test`,
     iconURL: client.user ? client.user.displayAvatarURL() : undefined,
   };
 }
@@ -1707,7 +1707,7 @@ process.on("uncaughtException", (err) => {
 // the actual Discord bot logic above.
 const http = require("http");
 http
-  .createServer((req, res) => res.end("RiftTiers bot is running."))
+  .createServer((req, res) => res.end("RyftTiers bot is running."))
   .listen(process.env.PORT || 3000);
 
 if (!process.env.DISCORD_TOKEN) {

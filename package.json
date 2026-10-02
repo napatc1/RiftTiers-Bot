@@ -1,7 +1,7 @@
 {
-  "name": "rifttiers-bot",
+  "name": "ryfttiers-bot",
   "version": "2.0.0",
-  "description": "Discord tier-testing bot for RiftTiers",
+  "description": "Discord tier-testing bot for RyftTiers",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
