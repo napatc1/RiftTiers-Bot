@@ -13,7 +13,7 @@ const {
   PermissionsBitField,
   ChannelType,
 } = require("discord.js");
-const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, ROLE_PING_IDS, PERMISSION_ROLE_IDS } = require("./config");
+const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS } = require("./config");
 const {
   supabase,
   syncProfileRoles,
@@ -141,9 +141,9 @@ const HIGH_QUEUE_MAX_INDEX = TIER_OPTIONS.indexOf("LT3");
 // Finds the configured role for a gamemode by ID and returns a pingable
 // mention string, or empty string if not configured/found.
 function getRolePing(guild, gamemode) {
-  const roleId = ROLE_PING_IDS[gamemode];
-  if (!roleId) return "";
-  const role = guild.roles.cache.get(roleId);
+  const roleName = GAMEMODE_PING_ROLE_NAMES[gamemode];
+  if (!roleName) return "";
+  const role = guild.roles.cache.find((r) => r.name.toLowerCase() === roleName.toLowerCase());
   return role ? `<@&${role.id}> ` : "";
 }
 
@@ -474,15 +474,30 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
     const botMember = interaction.guild.members.me;
-    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+    const missingPerms = [];
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) missingPerms.push("Manage Channels");
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) missingPerms.push("Manage Roles");
+    if (missingPerms.length) {
       return interaction.reply({
-        content: "I need the **Manage Channels** permission to create the tiertest channels. Grant that to my role and try again.",
+        content: `I need the **${missingPerms.join("** and **")}** permission(s) to set this up. Grant them to my role and try again.`,
         ephemeral: true,
       });
     }
 
     await interaction.deferReply({ ephemeral: true });
     const region = interaction.options.getString("region", true);
+
+    // Roles first — channels below ping them immediately once posted.
+    const rolesCreated = [];
+    for (const roleName of Object.values(GAMEMODE_PING_ROLE_NAMES)) {
+      const exists = interaction.guild.roles.cache.find(
+        (r) => r.name.toLowerCase() === roleName.toLowerCase()
+      );
+      if (!exists) {
+        await interaction.guild.roles.create({ name: roleName, mentionable: true });
+        rolesCreated.push(roleName);
+      }
+    }
 
     let category = interaction.guild.channels.cache.find(
       (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tier testing"
@@ -528,11 +543,12 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const lines = [];
-    if (created.length) lines.push(`**Created:** ${created.join(", ")}`);
+    if (rolesCreated.length) lines.push(`**Roles created:** ${rolesCreated.join(", ")}`);
+    if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
     if (posted.length) lines.push(`**Posted a queue in:** ${posted.join(", ")}`);
     if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);
     return interaction.editReply({
-      content: lines.length ? lines.join("\n") : "Nothing to do — every tiertest channel already has a queue.",
+      content: lines.length ? lines.join("\n") : "Nothing to do — everything's already set up.",
     });
   }
 

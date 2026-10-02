@@ -17,19 +17,21 @@ const GAMEMODES = [
   "vanilla", "axe", "sword", "mace", "nethop", "pot", "smp", "uhc", "cart",
 ];
 
-// Discord role ID to ping when a queue opens for each gamemode. Using IDs
-// instead of names avoids any typo/casing mismatch. Right-click a role in
-// Discord (Developer Mode must be on) -> Copy Role ID.
-const ROLE_PING_IDS = {
-  vanilla: "1534543111982813206", // Crystal
-  axe: "1534543356699344946",
-  sword: "1534543181495013508",
-  mace: "1534543231503696032",
-  nethop: "1534543281856184490", // Netherite pot
-  pot: "1534543463238864956",
-  smp: "1534543402035581170",
-  uhc: "1545384834975793152",
-  cart: "1545385591426781244",
+// Discord role to ping when a queue opens for each gamemode, matched by
+// NAME rather than a hardcoded ID. This means the role just has to exist
+// (under this exact name) on whichever server the bot is running on —
+// nothing to copy/paste when moving servers. /setupqueues creates any of
+// these that are missing.
+const GAMEMODE_PING_ROLE_NAMES = {
+  vanilla: "Crystal",
+  axe: "Axe",
+  sword: "Sword",
+  mace: "Mace",
+  nethop: "NethOP",
+  pot: "Pot",
+  smp: "SMP",
+  uhc: "UHC",
+  cart: "Cart",
 };
 
 // Discord role IDs that grant website permissions. Kept separate from the
@@ -52,4 +54,4 @@ const TIER_OPTIONS = [
 // again for the same gamemode.
 const COOLDOWN_DAYS = 3;
 
-module.exports = { GAMEMODE_CHANNELS, GAMEMODES, ROLE_PING_IDS, PERMISSION_ROLE_IDS, TIER_OPTIONS, COOLDOWN_DAYS };
+module.exports = { GAMEMODE_CHANNELS, GAMEMODES, GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, TIER_OPTIONS, COOLDOWN_DAYS };

@@ -59,7 +59,7 @@ const commands = [
   new SlashCommandBuilder()
     .setName("setupqueues")
     .setDescription(
-      "One-time setup: creates every tiertest channel that's missing and posts a queue in each."
+      "One-time setup: creates every missing gamemode ping role + tiertest channel, and posts a queue in each."
     )
     .addStringOption((opt) =>
       opt
