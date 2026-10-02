@@ -25,6 +25,8 @@ const {
   PERMISSION_ROLE_IDS,
   SUPPORT_CATEGORY_NAME,
   GENERAL_CATEGORY_NAME,
+  TESTING_CATEGORY_NAME,
+  TESTING_CHANNELS,
   BASIC_CHANNELS,
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
@@ -131,8 +133,7 @@ Being in the waitlist simply means that you are waiting to be tested at some poi
 
 The queue is what you join once you are ready to actually test. When a tester for this region becomes available, @here will be pinged with a button to join the queue. This button is meant for players readily available to log on for their evaluation test.
 
-If no testers are available, the queue remains closed and you will not see the button until a tester has marked themselves as active.
-**There will not be a queue message present if there is no tester actively testing at that exact moment.**
+If no testers are available, the queue card here will show **No Testers Online** and the Join button will be disabled. You'll be pinged the moment a tester opens it back up.
 
 After a tester has marked themselves as unavailable with no other testers active, the queue will be closed. If you were in the queue, your queue position will not be saved. You can still enter the queue again like normal whenever a tester becomes available.
 
@@ -150,6 +151,29 @@ function buildVerifyInfoEmbed() {
         "Once both are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
     )
     .setColor(0x3fa0f5);
+}
+
+// General tier-testing rubric/rules, modeled on the common MCTiers-style
+// conventions (10-tier scale split into High/Low bands, result based on
+// the single best performance, retest cooldown). Edit this to taste or
+// paste in your own exact wording — it's only posted automatically the
+// first time #testing-rubric is created.
+function buildTestingRubricEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Tier Testing Rubric")
+    .setColor(0x3fa0f5)
+    .setDescription(
+      "Every gamemode uses the same 10-tier scale, from best to worst:\n" +
+        "**HT1, LT1, HT2, LT2, HT3, LT3, HT4, LT4, HT5, LT5**\n\n" +
+        "`HT` = High Tier, `LT` = Low Tier. Landing in the High band of a tier means you're a clear, consistent threat at that level; Low means you can hang in that tier but aren't dominant there.\n\n" +
+        "**How a test works**\n" +
+        "• Join the queue for the gamemode you want tested and wait for a tester to pull you into a private ticket.\n" +
+        "• You'll play a set against the tester (or a proxy at the tester's discretion). Your tier is based on your **best performance shown**, not an average — one great game can outweigh a few rough ones.\n" +
+        "• The tester judges on mechanics (combo/hit consistency, movement, aim), decision-making (when to engage/disengage, resource/potion usage), and overall game sense versus the standard expected at each tier.\n" +
+        "• The tester submits your result and a tier role is assigned automatically. You can see your tier on the website leaderboard.\n\n" +
+        `**Retesting**\nAfter a result, you're on a ${COOLDOWN_DAYS}-day cooldown before you can queue again for that same gamemode, so testers aren't re-testing the same players back-to-back. Staff can lift this early for a good reason — ask in a ticket.\n\n` +
+        "**Conduct**\nBe respectful to your tester and anyone else in the ticket. Stream-sniping, cheating, smurfing to dodge a known result, or being abusive toward staff will get your test cancelled and can lead to a ban from testing entirely."
+    );
 }
 
 // ---------- website role sync ----------
@@ -239,10 +263,35 @@ function discordTimestamp(isoString) {
   return `<t:${unix}:F> (<t:${unix}:R>)`;
 }
 
-async function closedLine(queueKey) {
+// Same idea but without the relative "(3 hours ago)" suffix — just a clean
+// absolute date/time, for the closed-queue card.
+function absoluteTimestamp(isoString) {
+  if (!isoString) return null;
+  const unix = Math.floor(new Date(isoString).getTime() / 1000);
+  return `<t:${unix}:F>`;
+}
+
+// Branded little header used on both queue embeds, closed or open.
+function queueAuthor(gamemode) {
+  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
+  return {
+    name: `RiftTiers — ${display} Tier Test`,
+    iconURL: client.user ? client.user.displayAvatarURL() : undefined,
+  };
+}
+
+// "No Testers Online" card shown in place of the queue list while closed —
+// styled after MCTiers' closed-queue embed: a branded header, a bold
+// heading, a short friendly explanation, and a clean last-session date.
+async function closedCardDescription(queueKey, region) {
   const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
-  const ts = discordTimestamp(lastOpenedAt);
-  return `_Queue is closed._\n${ts ? `Last opened: ${ts}` : "Hasn't been opened yet."}\n\n`;
+  const ts = absoluteTimestamp(lastOpenedAt);
+  return (
+    (region ? `**Region:** ${region}\n\n` : "") +
+    "**No Testers Online**\n" +
+    "No testers are available for this gamemode right now. You'll be pinged here the moment a tester opens the queue — check back later!\n\n" +
+    `**Last testing session:** ${ts || "Hasn't been opened yet."}`
+  );
 }
 
 async function buildQueueEmbed(queueKey, gamemode) {
@@ -253,15 +302,17 @@ async function buildQueueEmbed(queueKey, gamemode) {
     activeTestersBlock(queueKey),
     formatQueue(queueKey),
   ]);
-  return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} Queue (${count})${closed ? " — CLOSED" : ""}`)
-    .setDescription(
-      (region ? `**Server Region:** ${region}\n\n` : "") +
-        (closed ? await closedLine(queueKey) : "") +
-        testersBlock +
-        queueText
-    )
+  const embed = new EmbedBuilder()
+    .setAuthor(queueAuthor(gamemode))
     .setColor(closed ? 0x555555 : 0xffd54a);
+  if (closed) {
+    return embed.setDescription(await closedCardDescription(queueKey, region));
+  }
+  return embed
+    .setTitle(`${gamemode.toUpperCase()} Queue (${count})`)
+    .setDescription(
+      (region ? `**Server Region:** ${region}\n\n` : "") + testersBlock + queueText
+    );
 }
 
 async function buildHighQueueEmbed(highKey, gamemode) {
@@ -272,15 +323,19 @@ async function buildHighQueueEmbed(highKey, gamemode) {
     activeTestersBlock(highKey),
     formatQueue(highKey),
   ]);
-  return new EmbedBuilder()
-    .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${closed ? " — CLOSED" : ""}`)
+  const embed = new EmbedBuilder()
+    .setAuthor(queueAuthor(gamemode))
+    .setColor(closed ? 0x555555 : 0xff8a3d);
+  if (closed) {
+    return embed.setDescription(await closedCardDescription(highKey, region));
+  }
+  return embed
+    .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})`)
     .setDescription(
       (region ? `**Server Region:** ${region}\n\n` : "") +
-        (closed ? await closedLine(highKey) : "") +
         testersBlock +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${queueText}`
-    )
-    .setColor(closed ? 0x555555 : 0xff8a3d);
+    );
 }
 
 // Main queue message: anyone can Join/Leave, testers can pull Next or
@@ -630,6 +685,40 @@ client.on("interactionCreate", async (interaction) => {
     }
     const commandsChannel = basicChannelsByName.commands || null;
 
+    // "Testing" category: reference channels (rubric, results) separate from
+    // the per-gamemode queue categories. #testing-rubric gets the rubric
+    // posted automatically the first time it's created.
+    let testingCategory = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === TESTING_CATEGORY_NAME.toLowerCase()
+    );
+    if (!testingCategory) {
+      testingCategory = await interaction.guild.channels.create({
+        name: TESTING_CATEGORY_NAME,
+        type: ChannelType.GuildCategory,
+      });
+    }
+    const testingCreated = [];
+    for (const spec of TESTING_CHANNELS) {
+      let channel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === spec.name
+      );
+      let justCreated = false;
+      if (!channel) {
+        channel = await interaction.guild.channels.create({
+          name: spec.name,
+          type: ChannelType.GuildText,
+          parent: testingCategory.id,
+        });
+        testingCreated.push(spec.name);
+        justCreated = true;
+      } else if (channel.parentId !== testingCategory.id) {
+        await channel.setParent(testingCategory.id, { lockPermissions: false }).catch(() => {});
+      }
+      if (spec.name === "testing-rubric" && justCreated) {
+        await channel.send({ embeds: [buildTestingRubricEmbed()] }).catch(() => {});
+      }
+    }
+
     // Delete Discord's default starter channels — replaced by the above.
     const deleted = [];
     for (const target of DEFAULT_CHANNELS_TO_REMOVE) {
@@ -708,6 +797,7 @@ client.on("interactionCreate", async (interaction) => {
     if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
     if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
     if (basicCreated.length) lines.push(`**Basic channels created:** ${basicCreated.map((n) => `#${n}`).join(", ")}`);
+    if (testingCreated.length) lines.push(`**Testing channels created:** ${testingCreated.map((n) => `#${n}`).join(", ")}`);
     if (deleted.length) lines.push(`**Deleted:** ${deleted.join(", ")}`);
     if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
@@ -1155,6 +1245,14 @@ client.on("interactionCreate", async (interaction) => {
     if (!gamemode) return;
 
     if (interaction.customId === "queue_join") {
+      const verifiedUsername = await getVerifiedUsername(interaction.user.id);
+      if (!verifiedUsername) {
+        return interaction.reply({
+          content:
+            "You need to verify before joining a queue — head to the **Verify** tab on the website (or run `/verify`) to link your Minecraft account first.",
+          ephemeral: true,
+        });
+      }
       if (await isQueueClosed(gamemode)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }

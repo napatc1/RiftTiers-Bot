@@ -60,6 +60,15 @@ const COOLDOWN_DAYS = 3;
 // queueCategoryName() below.
 const SUPPORT_CATEGORY_NAME = "Support Tickets";
 const GENERAL_CATEGORY_NAME = "General";
+const TESTING_CATEGORY_NAME = "Testing";
+
+// Reference channels /setupqueues creates under TESTING_CATEGORY_NAME.
+// "testing-rubric" gets the tier rubric posted into it automatically the
+// first time it's created (same one-shot-on-create pattern as #verify).
+const TESTING_CHANNELS = [
+  { name: "testing-rubric" },
+  { name: "results" },
+];
 
 // Basic non-gamemode channels /setupqueues creates under GENERAL_CATEGORY_NAME.
 // "verify" gets the account-linking info posted into it automatically the
@@ -104,6 +113,8 @@ module.exports = {
   COOLDOWN_DAYS,
   SUPPORT_CATEGORY_NAME,
   GENERAL_CATEGORY_NAME,
+  TESTING_CATEGORY_NAME,
+  TESTING_CHANNELS,
   BASIC_CHANNELS,
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
