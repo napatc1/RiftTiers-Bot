@@ -12,8 +12,21 @@ const {
   TextInputStyle,
   PermissionsBitField,
   ChannelType,
+  REST,
+  Routes,
 } = require("discord.js");
-const { GAMEMODE_CHANNELS, TIER_OPTIONS, COOLDOWN_DAYS, GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS } = require("./config");
+const commands = require("./commands");
+const {
+  GAMEMODE_CHANNELS,
+  GAMEMODES,
+  TIER_OPTIONS,
+  COOLDOWN_DAYS,
+  GAMEMODE_PING_ROLE_NAMES,
+  PERMISSION_ROLE_IDS,
+  QUEUES_CATEGORY_NAME,
+  SUPPORT_CATEGORY_NAME,
+  tierRoleName,
+} = require("./config");
 const {
   supabase,
   syncProfileRoles,
@@ -48,12 +61,14 @@ const {
   setQueueMessage,
   getQueueMessage,
 } = require("./supabase");
+const { initRealtimeSync, handleTicketChannelMessage } = require("./realtime-sync");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -487,7 +502,7 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
     const region = interaction.options.getString("region", true);
 
-    // Roles first — channels below ping them immediately once posted.
+    // Ping roles first — channels below ping them immediately once posted.
     const rolesCreated = [];
     for (const roleName of Object.values(GAMEMODE_PING_ROLE_NAMES)) {
       const exists = interaction.guild.roles.cache.find(
@@ -499,12 +514,30 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
+    // Tier roles — one per (gamemode, tier) pair, e.g. "Crystal LT5",
+    // "UHC HT4". submit_result / /settier assign these automatically from
+    // then on (see assignTierRole in realtime-sync.js); this just makes
+    // sure every role exists up front.
+    let tierRolesCreatedCount = 0;
+    for (const gamemode of GAMEMODES) {
+      for (const tier of TIER_OPTIONS) {
+        const name = tierRoleName(gamemode, tier);
+        const exists = interaction.guild.roles.cache.find(
+          (r) => r.name.toLowerCase() === name.toLowerCase()
+        );
+        if (!exists) {
+          await interaction.guild.roles.create({ name, mentionable: false });
+          tierRolesCreatedCount++;
+        }
+      }
+    }
+
     let category = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === "tier testing"
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === QUEUES_CATEGORY_NAME.toLowerCase()
     );
     if (!category) {
       category = await interaction.guild.channels.create({
-        name: "Tier Testing",
+        name: QUEUES_CATEGORY_NAME,
         type: ChannelType.GuildCategory,
       });
     }
@@ -543,7 +576,8 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const lines = [];
-    if (rolesCreated.length) lines.push(`**Roles created:** ${rolesCreated.join(", ")}`);
+    if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
+    if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
     if (posted.length) lines.push(`**Posted a queue in:** ${posted.join(", ")}`);
     if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);
@@ -1352,6 +1386,25 @@ client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
   const guildId = process.env.DISCORD_GUILD_ID;
+
+  // Registers slash commands automatically on every boot — no shell access
+  // needed (Render's free tier doesn't have one). Re-registering the same
+  // command list is a harmless no-op; this only matters when a command is
+  // added/changed, like /setupqueues just was.
+  if (guildId && process.env.DISCORD_CLIENT_ID) {
+    try {
+      const rest = new REST().setToken(process.env.DISCORD_TOKEN);
+      await rest.put(Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID, guildId), {
+        body: commands.map((c) => c.toJSON()),
+      });
+      console.log("[startup] slash commands registered");
+    } catch (err) {
+      console.error("[startup] slash command registration failed:", err.message);
+    }
+  } else {
+    console.warn("[startup] DISCORD_CLIENT_ID or DISCORD_GUILD_ID not set, skipping command registration.");
+  }
+
   if (!guildId) {
     console.warn("[roles] DISCORD_GUILD_ID not set, skipping role sync.");
     return;
@@ -1369,12 +1422,26 @@ client.once("ready", async () => {
 
   await runSync();
   setInterval(runSync, 10 * 60 * 1000); // safety-net resync every 10 min
+
+  try {
+    const guild = await client.guilds.fetch(guildId);
+    await initRealtimeSync(guild);
+  } catch (err) {
+    console.error("[realtime-sync] failed to start:", err.message);
+  }
 });
 
 // Fires whenever a member's roles (or anything else) change — keeps the
 // website's permission flags current the moment staff are promoted/demoted.
 client.on("guildMemberUpdate", (_oldMember, newMember) => {
   syncMemberRoles(newMember);
+});
+
+// Relays staff replies typed directly in a ticket channel back to the
+// website (handleTicketChannelMessage no-ops instantly for any other
+// channel, so this is cheap to call for every message).
+client.on("messageCreate", (message) => {
+  handleTicketChannelMessage(message);
 });
 
 // Catch anything that slips through interaction handling so a single bad

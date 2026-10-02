@@ -54,4 +54,28 @@ const TIER_OPTIONS = [
 // again for the same gamemode.
 const COOLDOWN_DAYS = 3;
 
-module.exports = { GAMEMODE_CHANNELS, GAMEMODES, GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, TIER_OPTIONS, COOLDOWN_DAYS };
+// Category names /setupqueues and the realtime sync organize channels
+// under. Matched by name, same as the ping/tier roles above.
+const QUEUES_CATEGORY_NAME = "Queues";
+const SUPPORT_CATEGORY_NAME = "Support Tickets";
+
+// Builds the Discord role name for a (gamemode, tier) pair, e.g.
+// tierRoleName("vanilla", "LT5") -> "Crystal LT5", tierRoleName("uhc", "HT4")
+// -> "UHC HT4". Used both to create the role and to find/remove a player's
+// previous tier role in the same gamemode.
+function tierRoleName(gamemode, tier) {
+  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+  return `${display} ${tier}`;
+}
+
+module.exports = {
+  GAMEMODE_CHANNELS,
+  GAMEMODES,
+  GAMEMODE_PING_ROLE_NAMES,
+  PERMISSION_ROLE_IDS,
+  TIER_OPTIONS,
+  COOLDOWN_DAYS,
+  QUEUES_CATEGORY_NAME,
+  SUPPORT_CATEGORY_NAME,
+  tierRoleName,
+};

@@ -589,10 +589,23 @@ grant execute on function create_support_ticket, send_support_message, close_sup
 --     everyone, and so the bot can react to new tickets/messages
 -- ============================================================
 
-alter publication supabase_realtime add table queue_entries;
-alter publication supabase_realtime add table queue_testers;
-alter publication supabase_realtime add table queue_closed;
-alter publication supabase_realtime add table live_tests;
-alter publication supabase_realtime add table test_log;
-alter publication supabase_realtime add table support_tickets;
-alter publication supabase_realtime add table support_messages;
+-- ADD TABLE has no IF NOT EXISTS, and errors (aborting the rest of this
+-- script) if the table's already a publication member — so re-running this
+-- file a second time would otherwise silently stop here. Guard each one.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'queue_entries', 'queue_testers', 'queue_closed', 'live_tests',
+    'test_log', 'support_tickets', 'support_messages', 'player_tiers'
+  ]
+  loop
+    if not exists (
+      select 1 from pg_publication_tables
+      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
+    ) then
+      execute format('alter publication supabase_realtime add table %I', t);
+    end if;
+  end loop;
+end $$;
