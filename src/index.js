@@ -2013,8 +2013,27 @@ client.on("interactionCreate", async (interaction) => {
     if (!gamemode || !channel) {
       return interaction.reply({ content: "Couldn't find that queue channel — ask staff to run /setupqueues.", ephemeral: true });
     }
+
+    // Give them the gamemode ping role so they're notified when the queue opens.
+    const pingRoleName = GAMEMODE_PING_ROLE_NAMES[gamemode];
+    let roleNote = "";
+    if (pingRoleName) {
+      const pingRole = interaction.guild.roles.cache.find(
+        (r) => r.name.toLowerCase() === pingRoleName.toLowerCase()
+      );
+      if (pingRole) {
+        const alreadyHas = interaction.member.roles.cache.has(pingRole.id);
+        if (!alreadyHas) {
+          await interaction.member.roles.add(pingRole).catch(() => {});
+          roleNote = `\nYou've been given the **${pingRoleName}** role — you'll be pinged here when the queue opens.`;
+        } else {
+          roleNote = `\nYou already have the **${pingRoleName}** role and will be pinged when the queue opens.`;
+        }
+      }
+    }
+
     return interaction.reply({
-      content: `Head to ${channel} and use the **Join Queue** button there once it's open.`,
+      content: `Head to ${channel} and use the **Join Queue** button there once it's open.${roleNote}`,
       ephemeral: true,
     });
   }
