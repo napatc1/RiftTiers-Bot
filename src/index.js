@@ -118,6 +118,28 @@ function getTesterRoles(guild) {
   );
 }
 
+// @everyone only actually pings when it's in a message's plain content, not
+// inside an embed, so this is sent as a normal message rather than an
+// embed. commandsChannel is a Channel object (or null, if #commands
+// somehow isn't around) — mentioned so players know where to run /leave.
+function buildWaitingListMessage(gamemodeDisplay, commandsChannel) {
+  const commandsMention = commandsChannel ? `<#${commandsChannel.id}>` : "#commands";
+  return `@everyone
+**__${gamemodeDisplay} Tier Test__**
+
+Being in the waitlist simply means that you are waiting to be tested at some point, it does not mean you are immediately going to be tested right away. Please be patient!
+
+The queue is what you join once you are ready to actually test. When a tester for this region becomes available, @here will be pinged with a button to join the queue. This button is meant for players readily available to log on for their evaluation test.
+
+If no testers are available, the queue remains closed and you will not see the button until a tester has marked themselves as active.
+**There will not be a queue message present if there is no tester actively testing at that exact moment.**
+
+After a tester has marked themselves as unavailable with no other testers active, the queue will be closed. If you were in the queue, your queue position will not be saved. You can still enter the queue again like normal whenever a tester becomes available.
+
+
+If you decide you no longer want to be tested, use \`/leave\` in the ${commandsMention} channel.`;
+}
+
 function buildVerifyInfoEmbed() {
   return new EmbedBuilder()
     .setTitle("Link your account to RiftTiers")
@@ -523,6 +545,7 @@ client.on("interactionCreate", async (interaction) => {
     const missingPerms = [];
     if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) missingPerms.push("Manage Channels");
     if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) missingPerms.push("Manage Roles");
+    if (!botMember.permissions.has(PermissionsBitField.Flags.MentionEveryone)) missingPerms.push("Mention @everyone, @here, and All Roles");
     if (missingPerms.length) {
       return interaction.reply({
         content: `I need the **${missingPerms.join("** and **")}** permission(s) to set this up. Grant them to my role and try again.`,
@@ -578,6 +601,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const basicCreated = [];
+    const basicChannelsByName = {};
     for (const spec of BASIC_CHANNELS) {
       let channel = interaction.guild.channels.cache.find(
         (c) => c.type === ChannelType.GuildText && c.name === spec.name
@@ -598,11 +622,13 @@ client.on("interactionCreate", async (interaction) => {
       } else if (channel.parentId !== generalCategory.id) {
         await channel.setParent(generalCategory.id, { lockPermissions: false }).catch(() => {});
       }
+      basicChannelsByName[spec.name] = channel;
 
       if (spec.name === "verify" && justCreated) {
         await channel.send({ embeds: [buildVerifyInfoEmbed()] }).catch(() => {});
       }
     }
+    const commandsChannel = basicChannelsByName.commands || null;
 
     // Delete Discord's default starter channels — replaced by the above.
     const deleted = [];
@@ -656,6 +682,14 @@ client.on("interactionCreate", async (interaction) => {
         skipped.push(channelName);
         continue;
       }
+
+      // Pinned-style explainer, pinging @everyone — posted once per channel
+      // alongside the queue message below (so a bot restart that loses
+      // track of the queue message, per channel.send() below, doesn't
+      // re-spam this too... except it will, same as the queue message
+      // itself, since neither is tracked in Supabase. Acceptable for now.
+      const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+      await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
 
       // New queues start CLOSED — staff open them explicitly (button or
       // /postqueue) when they're actually ready to test. No ping here since
