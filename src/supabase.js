@@ -329,6 +329,35 @@ async function getQueueLastOpenedAt(queueKey) {
   return data ? data.last_opened_at : null;
 }
 
+// "Locked" is separate from "closed" — a locked queue is still open and
+// visible (testers can still pull Next), it just stops accepting new joins.
+async function getQueueLocked(queueKey) {
+  const { data } = await supabase
+    .from("queue_closed")
+    .select("locked")
+    .eq("gamemode", queueKey)
+    .maybeSingle();
+  return data ? !!data.locked : false;
+}
+
+async function setQueueLocked(queueKey, locked) {
+  const { data: existing } = await supabase
+    .from("queue_closed")
+    .select("closed, region, last_opened_at")
+    .eq("gamemode", queueKey)
+    .maybeSingle();
+  await supabase.from("queue_closed").upsert(
+    {
+      gamemode: queueKey,
+      locked,
+      closed: existing ? existing.closed : false,
+      region: existing ? existing.region : null,
+      last_opened_at: existing ? existing.last_opened_at : null,
+    },
+    { onConflict: "gamemode" }
+  );
+}
+
 async function setQueueRegion(queueKey, region) {
   const { data: existing } = await supabase
     .from("queue_closed")
@@ -466,6 +495,8 @@ module.exports = {
   formatQueue,
   isQueueClosed,
   setQueueClosed,
+  getQueueLocked,
+  setQueueLocked,
   getQueueLastOpenedAt,
   setQueueRegion,
   getQueueRegion,

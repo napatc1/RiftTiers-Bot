@@ -52,11 +52,13 @@ create table if not exists queue_closed (
   gamemode text primary key,
   closed boolean not null default false,
   region text,
-  last_opened_at timestamptz
+  last_opened_at timestamptz,
+  locked boolean not null default false
 );
 
--- Safe to re-run against a queue_closed table created before this column existed.
+-- Safe to re-run against a queue_closed table created before these columns existed.
 alter table queue_closed add column if not exists last_opened_at timestamptz;
+alter table queue_closed add column if not exists locked boolean not null default false;
 
 create table if not exists live_tests (
   id bigint generated always as identity primary key,
@@ -265,14 +267,15 @@ as $$
 declare
   v_player_id bigint := current_player_id();
   v_closed boolean;
+  v_locked boolean;
   v_cooldown_until timestamptz;
 begin
   if v_player_id is null then
     raise exception 'not logged in';
   end if;
 
-  select closed into v_closed from queue_closed where gamemode = p_gamemode;
-  if v_closed and not current_is_tester() then
+  select closed, locked into v_closed, v_locked from queue_closed where gamemode = p_gamemode;
+  if (v_closed or v_locked) and not current_is_tester() then
     raise exception 'queue is closed';
   end if;
 
@@ -343,6 +346,24 @@ begin
   on conflict (gamemode) do update set closed = excluded.closed,
     region = coalesce(excluded.region, queue_closed.region),
     last_opened_at = case when excluded.closed then queue_closed.last_opened_at else now() end;
+end;
+$$;
+
+-- "Locked" is separate from "closed": a locked queue stays open/visible but
+-- stops accepting new joins. Not driven by any website UI yet (Discord-side
+-- Lock Queue button only) but exposed here for parity/future use.
+create or replace function set_queue_locked(p_gamemode text, p_locked boolean)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  if not current_is_tester() then
+    raise exception 'testers only';
+  end if;
+  insert into queue_closed (gamemode, locked)
+  values (p_gamemode, p_locked)
+  on conflict (gamemode) do update set locked = excluded.locked;
 end;
 $$;
 
@@ -463,11 +484,11 @@ $$;
 -- ============================================================
 
 revoke all on function join_queue, leave_queue, join_testing, leave_testing,
-  set_queue_closed, claim_next, cancel_live_test, submit_result, set_my_profile
+  set_queue_closed, set_queue_locked, claim_next, cancel_live_test, submit_result, set_my_profile
   from public;
 
 grant execute on function join_queue, leave_queue, join_testing, leave_testing,
-  set_queue_closed, claim_next, cancel_live_test, submit_result, set_my_profile
+  set_queue_closed, set_queue_locked, claim_next, cancel_live_test, submit_result, set_my_profile
   to authenticated;
 
 -- ============================================================

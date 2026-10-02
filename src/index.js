@@ -55,6 +55,8 @@ const {
   formatQueue,
   isQueueClosed,
   setQueueClosed,
+  getQueueLocked,
+  setQueueLocked,
   getQueueLastOpenedAt,
   setQueueRegion,
   getQueueRegion,
@@ -172,7 +174,7 @@ async function lockChannelToTesters(guild, channel) {
 // @everyone only actually pings when it's in a message's plain content, not
 // inside an embed, so this is sent as a normal message rather than an
 // embed. commandsChannel is a Channel object (or null, if #commands
-// somehow isn't around) — mentioned so players know where to run /leave.
+// somehow isn't around) — mentioned so players know where to chat instead.
 function buildWaitingListMessage(gamemodeDisplay, commandsChannel) {
   const commandsMention = commandsChannel ? `<#${commandsChannel.id}>` : "#commands";
   return `@everyone
@@ -180,16 +182,13 @@ function buildWaitingListMessage(gamemodeDisplay, commandsChannel) {
 
 Being in the waitlist simply means that you are waiting to be tested at some point, it does not mean you are immediately going to be tested right away. Please be patient!
 
-The queue is what you join once you are ready to actually test. When a tester for this region becomes available, @here will be pinged with a button to join the queue. This button is meant for players readily available to log on for their evaluation test.
+The queue is what you join once you are ready to actually test. When a tester for this region becomes available, the queue card here will update with a **Join Queue** button. This is meant for players readily available to log on for their evaluation test.
 
-If no testers are available, the queue card here will show **No Testers Online** and the Join button will be disabled. You'll be pinged the moment a tester opens it back up.
+If no testers are available, the queue card here will show **No Testers Online** with no join button at all. You'll be pinged here the moment a tester opens it back up.
 
 After a tester has marked themselves as unavailable with no other testers active, the queue will be closed. If you were in the queue, your queue position will not be saved. You can still enter the queue again like normal whenever a tester becomes available.
 
-
-This channel is read-only — use the buttons to join/leave, and chat in ${commandsMention} instead.
-
-If you decide you no longer want to be tested, use \`/leave\` in the ${commandsMention} channel.`;
+This channel is read-only — use the buttons on the queue card to join/leave, and chat in ${commandsMention} instead.`;
 }
 
 function buildVerifyInfoEmbed() {
@@ -346,8 +345,9 @@ async function closedCardDescription(queueKey, region) {
 }
 
 async function buildQueueEmbed(queueKey, gamemode) {
-  const [closed, count, region, testersBlock, queueText] = await Promise.all([
+  const [closed, locked, count, region, testersBlock, queueText] = await Promise.all([
     isQueueClosed(queueKey),
+    getQueueLocked(queueKey),
     getQueueCount(queueKey),
     getQueueRegion(queueKey),
     activeTestersBlock(queueKey),
@@ -355,20 +355,24 @@ async function buildQueueEmbed(queueKey, gamemode) {
   ]);
   const embed = new EmbedBuilder()
     .setAuthor(queueAuthor(gamemode))
-    .setColor(closed ? 0x555555 : 0xffd54a);
+    .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xffd54a);
   if (closed) {
     return embed.setDescription(await closedCardDescription(queueKey, region));
   }
   return embed
-    .setTitle(`${gamemode.toUpperCase()} Queue (${count})`)
+    .setTitle(`${gamemode.toUpperCase()} Queue (${count})${locked ? " — LOCKED" : ""}`)
     .setDescription(
-      (region ? `**Server Region:** ${region}\n\n` : "") + testersBlock + queueText
+      (region ? `**Server Region:** ${region}\n\n` : "") +
+        (locked ? "_Locked — not accepting new joins right now._\n\n" : "") +
+        testersBlock +
+        queueText
     );
 }
 
 async function buildHighQueueEmbed(highKey, gamemode) {
-  const [closed, count, region, testersBlock, queueText] = await Promise.all([
+  const [closed, locked, count, region, testersBlock, queueText] = await Promise.all([
     isQueueClosed(highKey),
+    getQueueLocked(highKey),
     getQueueCount(highKey),
     getQueueRegion(highKey),
     activeTestersBlock(highKey),
@@ -376,73 +380,81 @@ async function buildHighQueueEmbed(highKey, gamemode) {
   ]);
   const embed = new EmbedBuilder()
     .setAuthor(queueAuthor(gamemode))
-    .setColor(closed ? 0x555555 : 0xff8a3d);
+    .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xff8a3d);
   if (closed) {
     return embed.setDescription(await closedCardDescription(highKey, region));
   }
   return embed
-    .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})`)
+    .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${locked ? " — LOCKED" : ""}`)
     .setDescription(
       (region ? `**Server Region:** ${region}\n\n` : "") +
+        (locked ? "_Locked — not accepting new joins right now._\n\n" : "") +
         testersBlock +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${queueText}`
     );
 }
 
-// Main queue message: anyone can Join/Leave, testers can pull Next or
-// close/reopen the queue to new joins.
+// Main queue message. Closed: a single "Open Queue" button (testers only).
+// Open: Join/Leave on one row, Next/Lock/Close (testers only) on another.
+// Returns an array of action rows, ready to pass straight as `components`.
 async function buildQueueButtons(queueKey) {
   const closed = await isQueueClosed(queueKey);
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("queue_join")
-      .setLabel("Join Queue")
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(closed),
-    new ButtonBuilder()
-      .setCustomId("queue_leave")
-      .setLabel("Leave Queue")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("queue_next")
-      .setLabel("Next (Tester)")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("queue_toggle_close")
-      .setLabel(closed ? "Unlock Queue" : "Lock Queue")
-      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("queue_delete")
-      .setLabel("Close Queue")
-      .setStyle(ButtonStyle.Danger)
-  );
+  if (closed) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("queue_open").setLabel("Open Queue").setStyle(ButtonStyle.Success)
+      ),
+    ];
+  }
+  const locked = await getQueueLocked(queueKey);
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("queue_join")
+        .setLabel("Join Queue")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(locked),
+      new ButtonBuilder().setCustomId("queue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("queue_next").setLabel("Next/Pull (Tester Only)").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("queue_toggle_lock")
+        .setLabel(locked ? "Unlock Queue" : "Lock Queue")
+        .setStyle(locked ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("queue_close").setLabel("Close Queue").setStyle(ButtonStyle.Danger)
+    ),
+  ];
 }
 
 async function buildHighQueueButtons(highKey) {
   const closed = await isQueueClosed(highKey);
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("highqueue_join")
-      .setLabel("Join High Queue")
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(closed),
-    new ButtonBuilder()
-      .setCustomId("highqueue_leave")
-      .setLabel("Leave Queue")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("highqueue_next")
-      .setLabel("Next (Tester)")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("highqueue_toggle_close")
-      .setLabel(closed ? "Unlock Queue" : "Lock Queue")
-      .setStyle(closed ? ButtonStyle.Success : ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId("highqueue_delete")
-      .setLabel("Close Queue")
-      .setStyle(ButtonStyle.Danger)
-  );
+  if (closed) {
+    return [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("highqueue_open").setLabel("Open Queue").setStyle(ButtonStyle.Success)
+      ),
+    ];
+  }
+  const locked = await getQueueLocked(highKey);
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("highqueue_join")
+        .setLabel("Join High Queue")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(locked),
+      new ButtonBuilder().setCustomId("highqueue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("highqueue_next").setLabel("Next/Pull (Tester Only)").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("highqueue_toggle_lock")
+        .setLabel(locked ? "Unlock Queue" : "Lock Queue")
+        .setStyle(locked ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("highqueue_close").setLabel("Close Queue").setStyle(ButtonStyle.Danger)
+    ),
+  ];
 }
 
 function buildTicketButtons(gamemode, testeeId) {
@@ -461,7 +473,7 @@ function buildTicketButtons(gamemode, testeeId) {
 async function refreshQueueMessage(interaction, gamemode) {
   await interaction.message.edit({
     embeds: [await buildQueueEmbed(gamemode, gamemode)],
-    components: [await buildQueueButtons(gamemode)],
+    components: await buildQueueButtons(gamemode),
   });
 }
 
@@ -469,8 +481,36 @@ async function refreshHighQueueMessage(interaction, gamemode) {
   const highKey = `${gamemode}:high`;
   await interaction.message.edit({
     embeds: [await buildHighQueueEmbed(highKey, gamemode)],
-    components: [await buildHighQueueButtons(highKey)],
+    components: await buildHighQueueButtons(highKey),
   });
+}
+
+// Deletes whatever message is currently tracked for this queue (if any) and
+// posts a brand-new one reflecting its current state, instead of editing in
+// place. Used for the open <-> closed transition so the card resurfaces at
+// the bottom of the channel and can carry a ping as part of the same
+// message (rather than a separate ping message). `content` is the optional
+// text (role ping, etc.) sent alongside the embed.
+async function postFreshQueueMessage(channel, queueKey, gamemode, { isHigh = false, content = "" } = {}) {
+  const info = getQueueMessage(queueKey);
+  if (info) {
+    try {
+      const oldChannel = await channel.guild.channels.fetch(info.channelId).catch(() => null);
+      const oldMessage = oldChannel ? await oldChannel.messages.fetch(info.messageId).catch(() => null) : null;
+      if (oldMessage) await oldMessage.delete().catch(() => {});
+    } catch (err) {
+      console.error("[postFreshQueueMessage] couldn't delete old message:", err.message);
+    }
+  }
+  const embed = isHigh ? await buildHighQueueEmbed(queueKey, gamemode) : await buildQueueEmbed(queueKey, gamemode);
+  const components = isHigh ? await buildHighQueueButtons(queueKey) : await buildQueueButtons(queueKey);
+  const newMessage = await channel.send({
+    content: content || undefined,
+    embeds: [embed],
+    components,
+  });
+  setQueueMessage(queueKey, channel.id, newMessage.id);
+  return newMessage;
 }
 
 // Called when a ticket closes (result submitted or cancelled). Clears the
@@ -488,12 +528,12 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
       const highKey = `${info.gamemode}:high`;
       await queueMessage.edit({
         embeds: [await buildHighQueueEmbed(highKey, info.gamemode)],
-        components: [await buildHighQueueButtons(highKey)],
+        components: await buildHighQueueButtons(highKey),
       });
     } else {
       await queueMessage.edit({
         embeds: [await buildQueueEmbed(info.gamemode, info.gamemode)],
-        components: [await buildQueueButtons(info.gamemode)],
+        components: await buildQueueButtons(info.gamemode),
       });
     }
   } catch (err) {
@@ -629,13 +669,12 @@ client.on("interactionCreate", async (interaction) => {
     await addQueueTester(gamemode, interaction.user.id);
     const queueRegion = interaction.options.getString("region", true);
     await setQueueRegion(gamemode, queueRegion);
+    await setQueueClosed(gamemode, false);
+    await setQueueLocked(gamemode, false);
     await interaction.reply({ content: "Queue posted below.", ephemeral: true });
-    const queueMsg = await interaction.channel.send({
+    await postFreshQueueMessage(interaction.channel, gamemode, gamemode, {
       content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
-      embeds: [await buildQueueEmbed(gamemode, gamemode)],
-      components: [await buildQueueButtons(gamemode)],
     });
-    setQueueMessage(gamemode, interaction.channelId, queueMsg.id);
     return;
   }
 
@@ -836,16 +875,13 @@ client.on("interactionCreate", async (interaction) => {
       const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
       await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
 
-      // New queues start CLOSED — staff open them explicitly (button or
-      // /postqueue) when they're actually ready to test. No ping here since
-      // there's nothing to join yet.
+      // New queues start CLOSED — staff open them explicitly (the Open
+      // Queue button or /postqueue) when they're actually ready to test. No
+      // ping here since there's nothing to join yet.
       await setQueueRegion(gamemode, region);
       await setQueueClosed(gamemode, true);
-      const queueMsg = await channel.send({
-        embeds: [await buildQueueEmbed(gamemode, gamemode)],
-        components: [await buildQueueButtons(gamemode)],
-      });
-      setQueueMessage(gamemode, channel.id, queueMsg.id);
+      await setQueueLocked(gamemode, false);
+      await postFreshQueueMessage(channel, gamemode, gamemode);
       posted.push(channelName);
     }
 
@@ -955,7 +991,7 @@ client.on("interactionCreate", async (interaction) => {
         const queueMessage = await queueChannel.messages.fetch(stored.messageId);
         await queueMessage.edit({
           embeds: [await buildQueueEmbed(gamemode, gamemode)],
-          components: [await buildQueueButtons(gamemode)],
+          components: await buildQueueButtons(gamemode),
         });
       }
     } catch (err) {
@@ -1013,7 +1049,7 @@ client.on("interactionCreate", async (interaction) => {
         const queueMessage = await queueChannel.messages.fetch(stored.messageId);
         await queueMessage.edit({
           embeds: [await buildQueueEmbed(gamemode, gamemode)],
-          components: [await buildQueueButtons(gamemode)],
+          components: await buildQueueButtons(gamemode),
         });
       }
     } catch (err) {
@@ -1132,13 +1168,13 @@ client.on("interactionCreate", async (interaction) => {
     await addQueueTester(highKey, interaction.user.id);
     const highQueueRegion = interaction.options.getString("region", true);
     await setQueueRegion(highKey, highQueueRegion);
+    await setQueueClosed(highKey, false);
+    await setQueueLocked(highKey, false);
     await interaction.reply({ content: "High queue posted below.", ephemeral: true });
-    const highQueueMsg = await interaction.channel.send({
+    await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
+      isHigh: true,
       content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
-      embeds: [await buildHighQueueEmbed(highKey, gamemode)],
-      components: [await buildHighQueueButtons(highKey)],
     });
-    setQueueMessage(highKey, interaction.channelId, highQueueMsg.id);
     return;
   }
 
@@ -1312,6 +1348,9 @@ client.on("interactionCreate", async (interaction) => {
       if (await isQueueClosed(gamemode)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }
+      if (await getQueueLocked(gamemode)) {
+        return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
+      }
       const cooldownUntil = await getCooldownUntil(gamemode, interaction.user.id);
       if (cooldownUntil && cooldownUntil > Date.now()) {
         return interaction.reply({
@@ -1338,31 +1377,46 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    if (interaction.customId === "queue_toggle_close") {
+    // Closed -> open. Deletes the closed card and posts a fresh open one
+    // with the role ping baked into the same message's content.
+    if (interaction.customId === "queue_open") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      const nowClosed = !(await isQueueClosed(gamemode));
-      await setQueueClosed(gamemode, nowClosed);
-      await refreshQueueMessage(interaction, gamemode);
-      if (!nowClosed) {
-        // Unlocking: ping publicly since the confirmation below is ephemeral.
-        await interaction.channel.send({
-          content: `${getRolePing(interaction.guild, gamemode)}Queue is open again!`,
-        });
+      await interaction.reply({ content: "Opening the queue.", ephemeral: true });
+      await setQueueClosed(gamemode, false);
+      await setQueueLocked(gamemode, false);
+      await postFreshQueueMessage(interaction.channel, gamemode, gamemode, {
+        content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
+      });
+      return;
+    }
+
+    // Open queue, stays open/visible, just stops new joins — distinct from
+    // fully closing it.
+    if (interaction.customId === "queue_toggle_lock") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      const nowLocked = !(await getQueueLocked(gamemode));
+      await setQueueLocked(gamemode, nowLocked);
+      await refreshQueueMessage(interaction, gamemode);
       return interaction.reply({
-        content: nowClosed ? "Queue locked to new joins." : "Queue unlocked.",
+        content: nowLocked ? "Queue locked to new joins." : "Queue unlocked.",
         ephemeral: true,
       });
     }
 
-    if (interaction.customId === "queue_delete") {
+    // Open -> closed. Deletes the open card and posts a fresh closed
+    // "No Testers Online" one in its place.
+    if (interaction.customId === "queue_close") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      await interaction.reply({ content: "Closing this queue.", ephemeral: true });
-      await interaction.message.delete().catch(() => {});
+      await interaction.reply({ content: "Closing the queue.", ephemeral: true });
+      await setQueueClosed(gamemode, true);
+      await setQueueLocked(gamemode, false);
+      await postFreshQueueMessage(interaction.channel, gamemode, gamemode);
       return;
     }
 
@@ -1434,6 +1488,9 @@ client.on("interactionCreate", async (interaction) => {
       if (await isQueueClosed(highKey)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }
+      if (await getQueueLocked(highKey)) {
+        return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
+      }
 
       const username = await getVerifiedUsername(interaction.user.id);
       if (!username) {
@@ -1477,31 +1534,44 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    if (interaction.customId === "highqueue_toggle_close") {
+    if (interaction.customId === "highqueue_open") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
       const highKey = `${gamemode}:high`;
-      const nowClosed = !(await isQueueClosed(highKey));
-      await setQueueClosed(highKey, nowClosed);
-      await refreshHighQueueMessage(interaction, gamemode);
-      if (!nowClosed) {
-        await interaction.channel.send({
-          content: `${getRolePing(interaction.guild, gamemode)}High queue is open again!`,
-        });
+      await interaction.reply({ content: "Opening the high queue.", ephemeral: true });
+      await setQueueClosed(highKey, false);
+      await setQueueLocked(highKey, false);
+      await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
+        isHigh: true,
+        content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
+      });
+      return;
+    }
+
+    if (interaction.customId === "highqueue_toggle_lock") {
+      if (!isTester(interaction.member)) {
+        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      const highKey = `${gamemode}:high`;
+      const nowLocked = !(await getQueueLocked(highKey));
+      await setQueueLocked(highKey, nowLocked);
+      await refreshHighQueueMessage(interaction, gamemode);
       return interaction.reply({
-        content: nowClosed ? "High queue locked to new joins." : "High queue unlocked.",
+        content: nowLocked ? "High queue locked to new joins." : "High queue unlocked.",
         ephemeral: true,
       });
     }
 
-    if (interaction.customId === "highqueue_delete") {
+    if (interaction.customId === "highqueue_close") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      const highKey = `${gamemode}:high`;
       await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
-      await interaction.message.delete().catch(() => {});
+      await setQueueClosed(highKey, true);
+      await setQueueLocked(highKey, false);
+      await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
       return;
     }
 
