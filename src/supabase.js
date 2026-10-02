@@ -305,15 +305,28 @@ async function isQueueClosed(queueKey) {
 async function setQueueClosed(queueKey, closed) {
   const { data: existing } = await supabase
     .from("queue_closed")
-    .select("region")
+    .select("region, last_opened_at")
     .eq("gamemode", queueKey)
     .maybeSingle();
-  await supabase
+  await supabase.from("queue_closed").upsert(
+    {
+      gamemode: queueKey,
+      closed,
+      region: existing ? existing.region : null,
+      // Opening bumps the timestamp; closing leaves whatever it was.
+      last_opened_at: closed ? existing?.last_opened_at || null : new Date().toISOString(),
+    },
+    { onConflict: "gamemode" }
+  );
+}
+
+async function getQueueLastOpenedAt(queueKey) {
+  const { data } = await supabase
     .from("queue_closed")
-    .upsert(
-      { gamemode: queueKey, closed, region: existing ? existing.region : null },
-      { onConflict: "gamemode" }
-    );
+    .select("last_opened_at")
+    .eq("gamemode", queueKey)
+    .maybeSingle();
+  return data ? data.last_opened_at : null;
 }
 
 async function setQueueRegion(queueKey, region) {
@@ -453,6 +466,7 @@ module.exports = {
   formatQueue,
   isQueueClosed,
   setQueueClosed,
+  getQueueLastOpenedAt,
   setQueueRegion,
   getQueueRegion,
   addQueueTester,

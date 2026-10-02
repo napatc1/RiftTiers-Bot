@@ -24,6 +24,9 @@ const {
   GAMEMODE_PING_ROLE_NAMES,
   PERMISSION_ROLE_IDS,
   SUPPORT_CATEGORY_NAME,
+  GENERAL_CATEGORY_NAME,
+  BASIC_CHANNELS,
+  DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
   queueCategoryName,
 } = require("./config");
@@ -49,6 +52,7 @@ const {
   formatQueue,
   isQueueClosed,
   setQueueClosed,
+  getQueueLastOpenedAt,
   setQueueRegion,
   getQueueRegion,
   addQueueTester,
@@ -112,6 +116,18 @@ function getTesterRoles(guild) {
   return guild.roles.cache.filter((r) =>
     testerRoleNames.includes(r.name.toLowerCase())
   );
+}
+
+function buildVerifyInfoEmbed() {
+  return new EmbedBuilder()
+    .setTitle("Link your account to RiftTiers")
+    .setDescription(
+      "Linking takes two quick steps — one on the website, one with the bot.\n\n" +
+        "**1. Log into the website**\nOpen the RiftTiers website and click **Login with Discord** in the top-right corner. Once you're logged in you can join queues, open a Support ticket, and (if you're a tester) claim tests and submit results, right from the site.\n\n" +
+        "**2. Link your Minecraft username**\nIn any channel here, run:\n```/verify username:<your IGN> platform:<Bedrock/Premium/Cracked>```\nThis tells the bot which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
+        "Once both are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
+    )
+    .setColor(0x3fa0f5);
 }
 
 // ---------- website role sync ----------
@@ -192,6 +208,21 @@ async function activeTestersBlock(queueKey) {
   return block ? block + "\n" : "";
 }
 
+// Discord timestamp markup, e.g. "<t:1700000000:F> (<t:1700000000:R>)" ->
+// renders as a full date/time plus a "3 hours ago"-style relative label,
+// both in the viewer's own timezone automatically.
+function discordTimestamp(isoString) {
+  if (!isoString) return null;
+  const unix = Math.floor(new Date(isoString).getTime() / 1000);
+  return `<t:${unix}:F> (<t:${unix}:R>)`;
+}
+
+async function closedLine(queueKey) {
+  const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
+  const ts = discordTimestamp(lastOpenedAt);
+  return `_Queue is closed._\n${ts ? `Last opened: ${ts}` : "Hasn't been opened yet."}\n\n`;
+}
+
 async function buildQueueEmbed(queueKey, gamemode) {
   const [closed, count, region, testersBlock, queueText] = await Promise.all([
     isQueueClosed(queueKey),
@@ -204,7 +235,7 @@ async function buildQueueEmbed(queueKey, gamemode) {
     .setTitle(`${gamemode.toUpperCase()} Queue (${count})${closed ? " — CLOSED" : ""}`)
     .setDescription(
       (region ? `**Server Region:** ${region}\n\n` : "") +
-        (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+        (closed ? await closedLine(queueKey) : "") +
         testersBlock +
         queueText
     )
@@ -223,7 +254,7 @@ async function buildHighQueueEmbed(highKey, gamemode) {
     .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${closed ? " — CLOSED" : ""}`)
     .setDescription(
       (region ? `**Server Region:** ${region}\n\n` : "") +
-        (closed ? "_Queue is closed. No new joins right now._\n\n" : "") +
+        (closed ? await closedLine(highKey) : "") +
         testersBlock +
         `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${queueText}`
     )
@@ -532,6 +563,62 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
+    // Basic server channels (announcements/chat/commands/verify) under one
+    // shared "General" category. The verify-info embed is posted
+    // automatically the moment #verify is actually created, not on every
+    // re-run.
+    let generalCategory = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === GENERAL_CATEGORY_NAME.toLowerCase()
+    );
+    if (!generalCategory) {
+      generalCategory = await interaction.guild.channels.create({
+        name: GENERAL_CATEGORY_NAME,
+        type: ChannelType.GuildCategory,
+      });
+    }
+
+    const basicCreated = [];
+    for (const spec of BASIC_CHANNELS) {
+      let channel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === spec.name
+      );
+      let justCreated = false;
+      if (!channel) {
+        const overwrites = spec.announcementsOnly
+          ? [{ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.SendMessages] }]
+          : [];
+        channel = await interaction.guild.channels.create({
+          name: spec.name,
+          type: ChannelType.GuildText,
+          parent: generalCategory.id,
+          permissionOverwrites: overwrites,
+        });
+        basicCreated.push(spec.name);
+        justCreated = true;
+      } else if (channel.parentId !== generalCategory.id) {
+        await channel.setParent(generalCategory.id, { lockPermissions: false }).catch(() => {});
+      }
+
+      if (spec.name === "verify" && justCreated) {
+        await channel.send({ embeds: [buildVerifyInfoEmbed()] }).catch(() => {});
+      }
+    }
+
+    // Delete Discord's default starter channels — replaced by the above.
+    const deleted = [];
+    for (const target of DEFAULT_CHANNELS_TO_REMOVE) {
+      const wantType = target.type === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText;
+      const defaultChannel = interaction.guild.channels.cache.find(
+        (c) => c.type === wantType && c.name.toLowerCase() === target.name.toLowerCase()
+      );
+      if (defaultChannel && defaultChannel.id === interaction.channelId) {
+        deleted.push(`#${target.name} (${target.type}) — skipped, that's this channel; delete it manually`);
+      } else if (defaultChannel) {
+        await defaultChannel.delete().catch(() => {});
+        deleted.push(`#${target.name} (${target.type})`);
+      }
+    }
+
     const created = [];
     const categoriesCreated = [];
     const posted = [];
@@ -570,9 +657,12 @@ client.on("interactionCreate", async (interaction) => {
         continue;
       }
 
+      // New queues start CLOSED — staff open them explicitly (button or
+      // /postqueue) when they're actually ready to test. No ping here since
+      // there's nothing to join yet.
       await setQueueRegion(gamemode, region);
+      await setQueueClosed(gamemode, true);
       const queueMsg = await channel.send({
-        content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
         embeds: [await buildQueueEmbed(gamemode, gamemode)],
         components: [await buildQueueButtons(gamemode)],
       });
@@ -583,9 +673,11 @@ client.on("interactionCreate", async (interaction) => {
     const lines = [];
     if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
     if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
+    if (basicCreated.length) lines.push(`**Basic channels created:** ${basicCreated.map((n) => `#${n}`).join(", ")}`);
+    if (deleted.length) lines.push(`**Deleted:** ${deleted.join(", ")}`);
     if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
-    if (posted.length) lines.push(`**Posted a queue in:** ${posted.join(", ")}`);
+    if (posted.length) lines.push(`**Posted a queue (closed) in:** ${posted.join(", ")}`);
     if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);
     return interaction.editReply({
       content: lines.length ? lines.join("\n") : "Nothing to do — everything's already set up.",
@@ -617,22 +709,13 @@ client.on("interactionCreate", async (interaction) => {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
-    const channelId = process.env.VERIFY_CHANNEL_ID || "1555518328028536832";
     try {
-      const channel = await interaction.guild.channels.fetch(channelId);
-      await channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("Link your account to RiftTiers")
-            .setDescription(
-              "Linking takes two quick steps — one on the website, one with the bot.\n\n" +
-                "**1. Log into the website**\nOpen the RiftTiers website and click **Login with Discord** in the top-right corner. Once you're logged in you can join queues, open a Support ticket, and (if you're a tester) claim tests and submit results, right from the site.\n\n" +
-                "**2. Link your Minecraft username**\nIn any channel here, run:\n```/verify username:<your IGN> platform:<Bedrock/Premium/Cracked>```\nThis tells the bot which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
-                "Once both are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
-            )
-            .setColor(0x3fa0f5),
-        ],
-      });
+      const byName = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === "verify"
+      );
+      const channel =
+        byName || (await interaction.guild.channels.fetch(process.env.VERIFY_CHANNEL_ID || "1555518328028536832"));
+      await channel.send({ embeds: [buildVerifyInfoEmbed()] });
       return interaction.reply({ content: "Posted.", ephemeral: true });
     } catch (err) {
       console.error(err);

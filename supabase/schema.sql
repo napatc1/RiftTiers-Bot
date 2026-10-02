@@ -51,8 +51,12 @@ create table if not exists queue_testers (
 create table if not exists queue_closed (
   gamemode text primary key,
   closed boolean not null default false,
-  region text
+  region text,
+  last_opened_at timestamptz
 );
+
+-- Safe to re-run against a queue_closed table created before this column existed.
+alter table queue_closed add column if not exists last_opened_at timestamptz;
 
 create table if not exists live_tests (
   id bigint generated always as identity primary key,
@@ -334,10 +338,11 @@ begin
   if not current_is_tester() then
     raise exception 'testers only';
   end if;
-  insert into queue_closed (gamemode, closed, region)
-  values (p_gamemode, p_closed, p_region)
+  insert into queue_closed (gamemode, closed, region, last_opened_at)
+  values (p_gamemode, p_closed, p_region, case when p_closed then null else now() end)
   on conflict (gamemode) do update set closed = excluded.closed,
-    region = coalesce(excluded.region, queue_closed.region);
+    region = coalesce(excluded.region, queue_closed.region),
+    last_opened_at = case when excluded.closed then queue_closed.last_opened_at else now() end;
 end;
 $$;
 

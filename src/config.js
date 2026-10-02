@@ -59,6 +59,24 @@ const COOLDOWN_DAYS = 3;
 // gets its own category (e.g. "UHC Test") rather than sharing one, via
 // queueCategoryName() below.
 const SUPPORT_CATEGORY_NAME = "Support Tickets";
+const GENERAL_CATEGORY_NAME = "General";
+
+// Basic non-gamemode channels /setupqueues creates under GENERAL_CATEGORY_NAME.
+// "verify" gets the account-linking info posted into it automatically the
+// first time it's created. announcementsOnly denies @everyone Send Messages.
+const BASIC_CHANNELS = [
+  { name: "announcements", announcementsOnly: true },
+  { name: "chat" },
+  { name: "commands" },
+  { name: "verify" },
+];
+
+// Discord's default channels every new server starts with — /setupqueues
+// deletes these if found, since they're being replaced by the above.
+const DEFAULT_CHANNELS_TO_REMOVE = [
+  { name: "general", type: "text" },
+  { name: "general", type: "voice" },
+];
 
 // Builds the Discord role name for a (gamemode, tier) pair, e.g.
 // tierRoleName("vanilla", "LT5") -> "Crystal LT5", tierRoleName("uhc", "HT4")
@@ -85,6 +103,9 @@ module.exports = {
   TIER_OPTIONS,
   COOLDOWN_DAYS,
   SUPPORT_CATEGORY_NAME,
+  GENERAL_CATEGORY_NAME,
+  BASIC_CHANNELS,
+  DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
   queueCategoryName,
 };
