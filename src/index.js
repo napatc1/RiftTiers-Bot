@@ -1985,8 +1985,8 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.customId.startsWith("ticket_cat_")) {
       const category = interaction.customId.replace("ticket_cat_", "");
-      if (isRestricted(interaction.member) && category !== "appeal") {
-        return interaction.reply({ content: "You are restricted from opening tickets. You may only appeal a punishment.", ephemeral: true });
+      if (isRestricted(interaction.member) && category !== "appeal" && category !== "help") {
+        return interaction.reply({ content: "You are restricted. You may only open a Help or Appeal ticket.", ephemeral: true });
       }
       return interaction.showModal(buildTicketModal(category));
     }
