@@ -46,6 +46,7 @@ const {
 } = require("./config");
 const {
   supabase,
+  ensurePlayerForDiscordUser,
   syncProfileRoles,
   getPlayerRowByUsername,
   setPlayerTier,
@@ -577,11 +578,10 @@ function queueAuthor(gamemode) {
 // "No Testers Online" card shown in place of the queue list while closed —
 // styled after MCTiers' closed-queue embed: a branded header, a bold
 // heading, a short friendly explanation, and a clean last-session date.
-async function closedCardDescription(queueKey, region) {
+async function closedCardDescription(queueKey) {
   const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
   const ts = absoluteTimestamp(lastOpenedAt);
   return (
-    (region ? `**Region:** ${region}\n\n` : "") +
     "**No Testers Online**\n" +
     "No testers are available for this gamemode right now. You'll be pinged here the moment a tester opens the queue — check back later!\n\n" +
     `**Last testing session:** ${ts || "Hasn't been opened yet."}`
@@ -601,7 +601,7 @@ async function buildQueueEmbed(queueKey, gamemode) {
     .setAuthor(queueAuthor(gamemode))
     .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xffd54a);
   if (closed) {
-    return embed.setDescription(await closedCardDescription(queueKey, region));
+    return embed.setDescription(await closedCardDescription(queueKey));
   }
   return embed
     .setTitle(`${gamemode.toUpperCase()} Queue (${count})${locked ? " — LOCKED" : ""}`)
@@ -626,7 +626,7 @@ async function buildHighQueueEmbed(highKey, gamemode) {
     .setAuthor(queueAuthor(gamemode))
     .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xff8a3d);
   if (closed) {
-    return embed.setDescription(await closedCardDescription(highKey, region));
+    return embed.setDescription(await closedCardDescription(highKey));
   }
   return embed
     .setTitle(`${gamemode.toUpperCase()} HIGH Queue (${count})${locked ? " — LOCKED" : ""}`)
@@ -1887,30 +1887,38 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // Closed -> open. Shows a region picker modal first; the actual open
-    // happens when the modal is submitted (modal id: queue_open_modal).
+    // Closed -> open. Uses the tester's own region (from their verified
+    // profile) automatically — no more picking a region by hand.
     if (interaction.customId === "queue_open") {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      // Show the modal immediately — no async work before showModal or
-      // Discord's 3-second acknowledgement window will expire.
-      const modal = new ModalBuilder()
-        .setCustomId(`queue_open_modal:${gamemode}`)
-        .setTitle("Open Queue — Select Region");
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId("region")
-            .setLabel("Region (NA / EU / AS / ME / AU)")
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder("NA")
-            .setRequired(true)
-            .setMinLength(2)
-            .setMaxLength(2)
-        )
-      );
-      return interaction.showModal(modal);
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+        const region = tester?.region;
+        if (!region) {
+          return interaction.editReply({
+            content: "You don't have a region set yet — run `/verify` or set your region on the website, then try again.",
+          });
+        }
+        const channel =
+          interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
+          interaction.channel;
+        if (!channel) {
+          return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
+        }
+        await setQueueRegion(gamemode, region);
+        await setQueueClosed(gamemode, false);
+        await setQueueLocked(gamemode, false);
+        await postFreshQueueMessage(channel, gamemode, gamemode, {
+          content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
+        });
+        return interaction.editReply({ content: `Queue opened on **${region}** servers.` });
+      } catch (err) {
+        console.error("[queue_open] failed:", err.message);
+        return interaction.editReply({ content: "Something went wrong opening the queue. Check bot logs." });
+      }
     }
 
     // Open queue, stays open/visible, just stops new joins — distinct from
@@ -2060,22 +2068,34 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      const modal = new ModalBuilder()
-        .setCustomId(`highqueue_open_modal:${gamemode}`)
-        .setTitle("Open High Queue — Select Region");
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(
-          new TextInputBuilder()
-            .setCustomId("region")
-            .setLabel("Region (NA / EU / AS / ME / AU)")
-            .setStyle(TextInputStyle.Short)
-            .setPlaceholder("NA")
-            .setRequired(true)
-            .setMinLength(2)
-            .setMaxLength(2)
-        )
-      );
-      return interaction.showModal(modal);
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const highKey = `${gamemode}:high`;
+        const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+        const region = tester?.region;
+        if (!region) {
+          return interaction.editReply({
+            content: "You don't have a region set yet — run `/verify` or set your region on the website, then try again.",
+          });
+        }
+        const channel =
+          interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
+          interaction.channel;
+        if (!channel) {
+          return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
+        }
+        await setQueueRegion(highKey, region);
+        await setQueueClosed(highKey, false);
+        await setQueueLocked(highKey, false);
+        await postFreshQueueMessage(channel, highKey, gamemode, {
+          isHigh: true,
+          content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
+        });
+        return interaction.editReply({ content: `High queue opened on **${region}** servers.` });
+      } catch (err) {
+        console.error("[highqueue_open] failed:", err.message);
+        return interaction.editReply({ content: "Something went wrong opening the high queue. Check bot logs." });
+      }
     }
 
     if (interaction.customId === "highqueue_toggle_lock") {
@@ -2204,66 +2224,6 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // ---------- modal submit ----------
-
-  // Tester clicked "Open Queue" → chose a region → submit
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("queue_open_modal:")) {
-    const gamemode = interaction.customId.split(":")[1];
-    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
-    if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
-      return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
-    }
-    await interaction.deferReply({ ephemeral: true });
-    try {
-      // Find the tiertest channel by gamemode — interaction.channel may be
-      // null after a modal, and the real channel may carry an emoji prefix.
-      const channel =
-        interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
-        interaction.channel;
-      if (!channel) {
-        return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
-      }
-      await setQueueRegion(gamemode, region);
-      await setQueueClosed(gamemode, false);
-      await setQueueLocked(gamemode, false);
-      await postFreshQueueMessage(channel, gamemode, gamemode, {
-        content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
-      });
-      return interaction.editReply({ content: `Queue opened on **${region}** servers.` });
-    } catch (err) {
-      console.error("[queue_open_modal] failed:", err.message);
-      return interaction.editReply({ content: "Something went wrong opening the queue. Check bot logs." });
-    }
-  }
-
-  // Tester clicked "Open Queue" on the HIGH queue → chose a region → submit
-  if (interaction.isModalSubmit() && interaction.customId.startsWith("highqueue_open_modal:")) {
-    const gamemode = interaction.customId.split(":")[1];
-    const highKey = `${gamemode}:high`;
-    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
-    if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
-      return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
-    }
-    await interaction.deferReply({ ephemeral: true });
-    try {
-      const channel =
-        interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
-        interaction.channel;
-      if (!channel) {
-        return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
-      }
-      await setQueueRegion(highKey, region);
-      await setQueueClosed(highKey, false);
-      await setQueueLocked(highKey, false);
-      await postFreshQueueMessage(channel, highKey, gamemode, {
-        isHigh: true,
-        content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
-      });
-      return interaction.editReply({ content: `High queue opened on **${region}** servers.` });
-    } catch (err) {
-      console.error("[highqueue_open_modal] failed:", err.message);
-      return interaction.editReply({ content: "Something went wrong opening the high queue. Check bot logs." });
-    }
-  }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal_")) {
     const category = interaction.customId.replace("ticket_modal_", "");
