@@ -819,7 +819,7 @@ async function resolveDisplayName(guild, discordUserId) {
 // Tester role, the testee, and the tester who claimed them. Server owners
 // and anyone with Administrator automatically bypass overwrites, so they
 // always have access without needing an explicit entry.
-async function createTicketChannel(guild, sourceChannel, gamemode, testerMember, testeeId) {
+async function createTicketChannel(guild, sourceChannel, gamemode, testerMember, testeeId, { isHigh = false } = {}) {
   const testeeMember = await guild.members.fetch(testeeId).catch(() => null);
   const testerRoles = getTesterRoles(guild);
 
@@ -857,10 +857,33 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
     });
   }
 
+  // High queue tickets go in their own "High Tests" category — find it or create it.
+  let parentId = sourceChannel.parentId || null;
+  if (isHigh) {
+    const HIGH_TESTS_CATEGORY = "High Tests";
+    let highCat = guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name === HIGH_TESTS_CATEGORY
+    );
+    if (!highCat) {
+      highCat = await guild.channels.create({
+        name: HIGH_TESTS_CATEGORY,
+        type: ChannelType.GuildCategory,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          ...testerRoles.map((role) => ({
+            id: role.id,
+            allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+          })),
+        ],
+      });
+    }
+    parentId = highCat.id;
+  }
+
   const channel = await guild.channels.create({
     name: `ticket-${gamemode}-${slugify(testeeMember ? testeeMember.user.username : testeeId)}`,
     type: ChannelType.GuildText,
-    parent: sourceChannel.parentId || null,
+    parent: parentId,
     permissionOverwrites: overwrites,
   });
 
@@ -2485,7 +2508,8 @@ client.on("interactionCreate", async (interaction) => {
           interaction.channel,
           gamemode,
           interaction.member,
-          nextUserId
+          nextUserId,
+          { isHigh: true }
         );
         const testerIds = await getQueueTesterIds(highKey);
         setActiveTesting(highKey, {
