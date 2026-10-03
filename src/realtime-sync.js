@@ -493,6 +493,19 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
     })
     .subscribe();
 
+  // Backfill: process any live_tests rows that were claimed from the website
+  // before this bot instance started (discord_ticket_channel_id still null).
+  const { data: pendingTests } = await supabase
+    .from("live_tests")
+    .select("*")
+    .is("discord_ticket_channel_id", null);
+  if (pendingTests && pendingTests.length > 0) {
+    console.log(`[realtime-sync] backfilling ${pendingTests.length} pending live_test(s) without Discord channels`);
+    for (const row of pendingTests) {
+      await createTestTicketFromWebsite(guild, row, { onActiveTestSet });
+    }
+  }
+
   console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages, queue_closed, live_tests");
 }
 
