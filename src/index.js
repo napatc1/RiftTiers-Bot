@@ -80,7 +80,10 @@ const {
   clearActiveTestingByTicket,
   setQueueMessage,
   getQueueMessage,
+  deleteQueueMessage,
+  loadQueueMessages,
   createSupportTicketFromDiscord,
+  closeSupportTicketFromDiscord,
   createTesterApplication,
   getTesterApplication,
   setTesterApplicationReviewMessage,
@@ -750,7 +753,7 @@ async function postFreshQueueMessage(channel, queueKey, gamemode, { isHigh = fal
     embeds: [embed],
     components,
   });
-  setQueueMessage(queueKey, channel.id, newMessage.id);
+  await setQueueMessage(queueKey, channel.id, newMessage.id);
   return newMessage;
 }
 
@@ -1226,6 +1229,127 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /resetqueues — one-time cleanup for servers that ended up with
+  // duplicate tiertest channels and/or duplicate queue messages (this used
+  // to happen because the bot's queue-message tracking was in-memory only
+  // and forgot everything on restart — now persisted, see loadQueueMessages
+  // — and because re-running /setupqueues before the emoji-channel-name fix
+  // could create a second channel per gamemode instead of finding the
+  // first). For each gamemode: keeps exactly one tiertest channel (deleting
+  // any extras), renames it to its proper emoji name, purges every message
+  // in it, and re-posts exactly one fresh queue card (plus one high-queue
+  // card), both closed.
+  if (interaction.isChatInputCommand() && interaction.commandName === "resetqueues") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
+    }
+    const botMember = interaction.guild.members.me;
+    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+      return interaction.reply({ content: "I need the **Manage Channels** permission to do this.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const commandsChannel = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildText && c.name === "commands"
+    );
+
+    const report = [];
+    try {
+      for (const gamemode of GAMEMODES) {
+        const targetName = displayChannelName(gamemode);
+        if (!targetName) continue;
+
+        const matches = [
+          ...interaction.guild.channels.cache
+            .filter((c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name) === gamemode)
+            .values(),
+        ];
+        if (matches.length === 0) {
+          report.push(`**${gamemode}**: no channel found, skipped.`);
+          continue;
+        }
+
+        // Keep whichever channel is already correctly named (if any),
+        // otherwise just the first one found; delete the rest.
+        matches.sort((a, b) => (a.name === targetName ? -1 : b.name === targetName ? 1 : 0));
+        const [keep, ...extras] = matches;
+
+        for (const extra of extras) {
+          await extra.delete().catch((err) => console.error(`[resetqueues] couldn't delete #${extra.name}:`, err.message));
+        }
+
+        const categoryName = queueCategoryName(gamemode);
+        let category = interaction.guild.channels.cache.find(
+          (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
+        );
+        if (!category) {
+          category = await interaction.guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory });
+        }
+        if (keep.parentId !== category.id) {
+          await keep.setParent(category.id, { lockPermissions: false }).catch(() => {});
+        }
+        if (keep.name !== targetName) {
+          await keep.setName(targetName).catch((err) => console.error(`[resetqueues] couldn't rename #${keep.name}:`, err.message));
+        }
+        await lockChannelToTesters(interaction.guild, keep);
+
+        // Purge every message in the channel — duplicates, old pings, all
+        // of it — so it starts completely clean. bulkDelete only handles
+        // messages under 14 days old and up to 100 at a time; loop until
+        // there's nothing left or it stops making progress.
+        let purged = 0;
+        for (let i = 0; i < 20; i++) {
+          const batch = await keep.messages.fetch({ limit: 100 }).catch(() => null);
+          if (!batch || batch.size === 0) break;
+          const deletable = batch.filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
+          if (deletable.size > 0) {
+            const result = await keep.bulkDelete(deletable, true).catch(() => null);
+            purged += result ? result.size : 0;
+            if (!result || result.size === 0) {
+              // Nothing bulk-deletable left (likely all >14 days) — delete
+              // the rest one at a time instead of looping forever.
+              for (const m of batch.values()) {
+                await m.delete().catch(() => {});
+                purged++;
+              }
+              break;
+            }
+          } else {
+            for (const m of batch.values()) {
+              await m.delete().catch(() => {});
+              purged++;
+            }
+          }
+        }
+
+        // Drop any stale tracked message (it's gone now either way) and
+        // reset the queue to closed before posting fresh cards.
+        await deleteQueueMessage(gamemode);
+        await deleteQueueMessage(`${gamemode}:high`);
+        await setQueueClosed(gamemode, true);
+        await setQueueLocked(gamemode, false);
+        await setQueueClosed(`${gamemode}:high`, true);
+        await setQueueLocked(`${gamemode}:high`, false);
+
+        const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+        await keep.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
+        await postFreshQueueMessage(keep, gamemode, gamemode);
+        await postFreshQueueMessage(keep, `${gamemode}:high`, gamemode, { isHigh: true });
+
+        report.push(
+          `**${gamemode}**: kept #${keep.name}${extras.length ? ` (deleted ${extras.length} duplicate channel${extras.length === 1 ? "" : "s"})` : ""}, purged ${purged} message${purged === 1 ? "" : "s"}.`
+        );
+      }
+      return interaction.editReply({ content: report.join("\n") || "Nothing to clean up." });
+    } catch (err) {
+      console.error("[resetqueues] failed:", err.message);
+      return interaction.editReply({
+        content: `${report.join("\n")}\n\nStopped early after an error — check bot logs: ${err.message}`,
+      });
+    }
+  }
+
   // /verify
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
     const username = interaction.options.getString("username", true).trim();
@@ -1596,6 +1720,29 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.customId.startsWith("ticket_cat_")) {
       const category = interaction.customId.replace("ticket_cat_", "");
       return interaction.showModal(buildTicketModal(category));
+    }
+
+    // ---------- support ticket channel: "Close Ticket" button ----------
+    // Just flips the row in Supabase — the support_tickets realtime UPDATE
+    // listener in realtime-sync.js (the same one the website's close goes
+    // through) notices the status change and tears the channel down itself.
+    if (interaction.customId.startsWith("support_ticket_close_")) {
+      if (!canManageCooldowns(interaction.member)) {
+        return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
+      }
+      const ticketId = Number(interaction.customId.replace("support_ticket_close_", ""));
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const closed = await closeSupportTicketFromDiscord(ticketId);
+        return interaction.editReply({
+          content: closed
+            ? "Closing this ticket — the channel will be deleted shortly."
+            : "This ticket was already closed.",
+        });
+      } catch (err) {
+        console.error("[support_ticket_close] failed:", err.message);
+        return interaction.editReply({ content: "Something went wrong closing that ticket. Try again or close it from the website." });
+      }
     }
 
     // ---------- #tester-application ----------
@@ -2260,6 +2407,11 @@ client.on("interactionCreate", async (interaction) => {
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+
+  // Load the persisted queue-message tracking before anything can post or
+  // refresh a queue card — otherwise the first post after every restart
+  // wouldn't know about the previous message and would leave it behind.
+  await loadQueueMessages();
 
   const guildId = process.env.DISCORD_GUILD_ID;
 

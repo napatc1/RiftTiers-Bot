@@ -5,7 +5,7 @@
 // handleTicketChannelMessage(), which index.js's messageCreate listener
 // calls so staff replies typed in a ticket channel make it back to the
 // website.
-const { EmbedBuilder, ChannelType, PermissionsBitField } = require("discord.js");
+const { EmbedBuilder, ChannelType, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const { supabase, ensurePlayerForDiscordUser } = require("./supabase");
 const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, tierRoleName } = require("./config");
 
@@ -95,6 +95,15 @@ function ticketCategoryLabel(id) {
   );
 }
 
+function buildTicketCloseButton(ticketId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`support_ticket_close_${ticketId}`)
+      .setLabel("Close Ticket")
+      .setStyle(ButtonStyle.Danger)
+  );
+}
+
 // New support_tickets row -> create its Discord channel, post the opening
 // message, and remember the mapping.
 async function createTicketChannel(guild, ticket) {
@@ -131,12 +140,13 @@ async function createTicketChannel(guild, ticket) {
         new EmbedBuilder()
           .setTitle(`${ticketCategoryLabel(ticket.category)}: ${ticket.subject}`)
           .setDescription(
-            `Opened by **${player?.username || "a player"}** on the website.\n\n` +
+            `Opened by **${player?.username || "a player"}**.\n\n` +
               (firstMessage?.content || "*(no message)*") +
-              "\n\nReplies here are sent to the player on the website, and their replies show up here too. Edits and deletes sync too. Closing the ticket on the website deletes this channel and moves it to ticket history on the site."
+              "\n\nReplies here are sent to the player on the website, and their replies show up here too. Edits and deletes sync too. Use **Close Ticket** below (or close it on the website) to close it — either way deletes this channel and moves it to ticket history on the site."
           )
           .setColor(0x3fa0f5),
       ],
+      components: [buildTicketCloseButton(ticket.id)],
     });
 
     await supabase
@@ -160,7 +170,7 @@ async function closeTicketChannel(guild, ticket) {
     const channel = await guild.channels.fetch(ticket.discord_channel_id).catch(() => null);
     if (!channel) return;
     ticketChannelMap.delete(channel.id);
-    await channel.send({ content: "🔒 This ticket was closed on the website — this channel will be deleted shortly. It's kept in ticket history on the site." }).catch(() => {});
+    await channel.send({ content: "🔒 This ticket was closed — this channel will be deleted shortly. It's kept in ticket history on the site." }).catch(() => {});
     setTimeout(() => {
       channel.delete().catch((err) => console.error("[realtime-sync] failed to delete closed ticket channel:", err.message));
     }, 5000);

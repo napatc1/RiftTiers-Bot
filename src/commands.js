@@ -50,6 +50,12 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("resetqueues")
+    .setDescription(
+      "One-time cleanup: removes duplicate tiertest channels/messages, then re-posts one clean queue per gamemode."
+    ),
+
+  new SlashCommandBuilder()
     .setName("postverifyinfo")
     .setDescription(
       "Post step-by-step account-linking instructions to the verify-info channel."

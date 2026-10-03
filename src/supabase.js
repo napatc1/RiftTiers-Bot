@@ -423,6 +423,14 @@ async function getQueueTesterIds(queueKey) {
 // restart, same as before.
 const activeTestingByQueueKey = new Map(); // queueKey -> info
 const ticketToQueueKey = new Map(); // ticketChannelId -> queueKey
+
+// Which Discord message is the "live" queue card for each queue key
+// (gamemode, or "gamemode:high"). This DOES persist to Supabase (the
+// queue_messages table) — it used to be in-memory only, which meant every
+// bot restart forgot the tracked message and the next postFreshQueueMessage
+// call couldn't find/delete the old one, leaving duplicates behind. The
+// in-memory map below is now just a read cache, loaded from Supabase once
+// at startup via loadQueueMessages().
 const queueMessages = new Map(); // queueKey -> { channelId, messageId }
 
 function setActiveTesting(queueKey, info) {
@@ -444,11 +452,33 @@ function clearActiveTestingByTicket(ticketChannelId) {
   ticketToQueueKey.delete(ticketChannelId);
   return info || null;
 }
-function setQueueMessage(queueKey, channelId, messageId) {
+async function setQueueMessage(queueKey, channelId, messageId) {
   queueMessages.set(queueKey, { channelId, messageId });
+  const { error } = await supabase
+    .from("queue_messages")
+    .upsert({ queue_key: queueKey, channel_id: channelId, message_id: messageId, updated_at: new Date().toISOString() });
+  if (error) console.error("[queue_messages] upsert failed:", error.message);
 }
 function getQueueMessage(queueKey) {
   return queueMessages.get(queueKey) || null;
+}
+async function deleteQueueMessage(queueKey) {
+  queueMessages.delete(queueKey);
+  const { error } = await supabase.from("queue_messages").delete().eq("queue_key", queueKey);
+  if (error) console.error("[queue_messages] delete failed:", error.message);
+}
+// Populates the in-memory cache from Supabase — call once at bot startup,
+// before anything calls getQueueMessage.
+async function loadQueueMessages() {
+  const { data, error } = await supabase.from("queue_messages").select("queue_key, channel_id, message_id");
+  if (error) {
+    console.error("[queue_messages] load failed:", error.message);
+    return;
+  }
+  for (const row of data || []) {
+    queueMessages.set(row.queue_key, { channelId: row.channel_id, messageId: row.message_id });
+  }
+  console.log(`[queue_messages] loaded ${data?.length || 0} tracked queue message(s)`);
 }
 
 // ---------- role sync ----------
@@ -497,6 +527,25 @@ async function createSupportTicketFromDiscord(discordUserId, displayName, catego
   });
 
   return ticket.id;
+}
+
+// Closes a ticket from the Discord-side "Close Ticket" button — mirrors
+// what the website's close action does to the row. The support_tickets
+// realtime UPDATE listener (same one the website's close uses) picks this
+// up and tears down the Discord channel, so this function only needs to
+// flip the row; it doesn't touch Discord itself.
+// Returns true if it actually closed something, false if the ticket was
+// already closed (so the button handler can say so instead of acting twice).
+async function closeSupportTicketFromDiscord(ticketId) {
+  const { data, error } = await supabase
+    .from("support_tickets")
+    .update({ status: "closed", closed_at: new Date().toISOString() })
+    .eq("id", ticketId)
+    .eq("status", "open")
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
 }
 
 // ---------- tester applications (#tester-application) ----------
@@ -578,7 +627,10 @@ module.exports = {
   clearActiveTestingByTicket,
   setQueueMessage,
   getQueueMessage,
+  deleteQueueMessage,
+  loadQueueMessages,
   createSupportTicketFromDiscord,
+  closeSupportTicketFromDiscord,
   createTesterApplication,
   getTesterApplication,
   setTesterApplicationReviewMessage,

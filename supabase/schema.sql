@@ -60,6 +60,21 @@ create table if not exists queue_closed (
 alter table queue_closed add column if not exists last_opened_at timestamptz;
 alter table queue_closed add column if not exists locked boolean not null default false;
 
+-- Bot-internal: remembers which Discord message is the "live" queue card
+-- for each queue key (a gamemode id, or "<gamemode>:high"), so the bot can
+-- delete the old one before posting a fresh one — including across a bot
+-- restart, which used to forget this (it was in-memory only) and left
+-- duplicate queue messages behind every time the process restarted.
+-- No public policies: only the bot's service-role key (which bypasses RLS)
+-- ever touches this table.
+create table if not exists queue_messages (
+  queue_key text primary key,
+  channel_id text not null,
+  message_id text not null,
+  updated_at timestamptz not null default now()
+);
+alter table queue_messages enable row level security;
+
 create table if not exists live_tests (
   id bigint generated always as identity primary key,
   player_id bigint not null references players(id) on delete cascade,
