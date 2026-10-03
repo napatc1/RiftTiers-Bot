@@ -1693,10 +1693,11 @@ client.on("interactionCreate", async (interaction) => {
           ephemeral: true,
         });
       }
-      if (await isQueueClosed(gamemode)) {
+      const testerJoining = isTester(interaction.member);
+      if (!testerJoining && await isQueueClosed(gamemode)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }
-      if (await getQueueLocked(gamemode)) {
+      if (!testerJoining && await getQueueLocked(gamemode)) {
         return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
       }
       const cooldownUntil = await getCooldownUntil(gamemode, interaction.user.id);
@@ -1843,11 +1844,12 @@ client.on("interactionCreate", async (interaction) => {
     // ---------- high queue ----------
     if (interaction.customId === "highqueue_join") {
       const highKey = `${gamemode}:high`;
+      const testerJoiningHigh = isTester(interaction.member);
 
-      if (await isQueueClosed(highKey)) {
+      if (!testerJoiningHigh && await isQueueClosed(highKey)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }
-      if (await getQueueLocked(highKey)) {
+      if (!testerJoiningHigh && await getQueueLocked(highKey)) {
         return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
       }
 
