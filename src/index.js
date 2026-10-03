@@ -2923,8 +2923,38 @@ client.on("guildMemberUpdate", (_oldMember, newMember) => {
 // Relays staff replies typed directly in a ticket channel back to the
 // website (handleTicketChannelMessage no-ops instantly for any other
 // channel, so this is cheap to call for every message).
-client.on("messageCreate", (message) => {
+client.on("messageCreate", async (message) => {
   handleTicketChannelMessage(message);
+
+  // Sticky "Testing Punishments" message in #punishments channel.
+  // Whenever anyone (including the bot's own sticky repost) sends a message,
+  // delete the previous sticky and repost it at the bottom.
+  const STICKY_CHANNEL_ID = "1555554731265630349";
+  if (message.channelId === STICKY_CHANNEL_ID && !message.author.bot) {
+    try {
+      // Delete the previous sticky if we stored its ID
+      if (client._stickyPunishmentsMessageId) {
+        const ch = message.channel;
+        const prev = await ch.messages.fetch(client._stickyPunishmentsMessageId).catch(() => null);
+        if (prev) await prev.delete().catch(() => {});
+      }
+      const sticky = await message.channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("Testing Punishments")
+            .setColor(0x2f7fd6)
+            .setDescription(
+              "Violations of #ranked-ruleset are handled case by case by staff, but as a general guide:\n\n" +
+              "**Minor** *(being disrespectful to a tester, wasting a tester's time, minor sandbagging)*\n→ Warning, and the test may be voided.\n\n" +
+              "**Major** *(cheating, using an alt to dodge a result, stream-sniping)*\n→ Test voided, temporary testing ban (duration at staff discretion).\n\n" +
+              "**Severe** *(repeat offenses, abusive behavior toward staff/testers)*\n→ Permanent testing ban, possible server ban.\n\n" +
+              "Disagree with a punishment? Open an **Appeal a tier** or **Help** ticket and explain your case."
+            ),
+        ],
+      });
+      client._stickyPunishmentsMessageId = sticky.id;
+    } catch {}
+  }
 });
 
 // Edits/deletes of a mirrored ticket message on the Discord side should show
