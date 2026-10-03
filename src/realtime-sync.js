@@ -304,12 +304,28 @@ async function initRealtimeSync(guild, { onQueueStateChange } = {}) {
 
   // Watch queue_closed so that opening/closing from the website (which calls
   // the set_queue_closed RPC directly) is reflected in Discord immediately.
+  //
+  // Debounced per queue key: opening/closing from Discord triggers both a
+  // setQueueClosed and a setQueueLocked write in quick succession, each
+  // producing its own realtime event. Without debouncing, onQueueStateChange
+  // fires twice and posts two identical cards to the channel. 400 ms is
+  // enough to collapse the pair into one call while still feeling instant.
   if (onQueueStateChange) {
+    const queueDebounceTimers = new Map();
     supabase
       .channel("bot-queue-closed")
       .on("postgres_changes", { event: "*", schema: "public", table: "queue_closed" }, (payload) => {
         const row = payload.new;
-        if (row) onQueueStateChange(guild, row);
+        if (!row) return;
+        const key = row.gamemode;
+        if (queueDebounceTimers.has(key)) clearTimeout(queueDebounceTimers.get(key));
+        queueDebounceTimers.set(
+          key,
+          setTimeout(() => {
+            queueDebounceTimers.delete(key);
+            onQueueStateChange(guild, row);
+          }, 400)
+        );
       })
       .subscribe();
   }

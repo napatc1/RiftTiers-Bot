@@ -720,6 +720,23 @@ async function refreshHighQueueMessage(interaction, highKey, gamemode) {
   });
 }
 
+// Keys the bot recently wrote to queue_closed itself (open/close from
+// Discord). Suppresses the realtime echo for 2 s so the bot doesn't
+// re-post the card a second time via onQueueStateChange.
+const realtimeSuppressUntil = new Map();
+
+function suppressRealtimeFor(queueKey, ms = 2000) {
+  realtimeSuppressUntil.set(queueKey, Date.now() + ms);
+}
+
+function isRealtimeSuppressed(queueKey) {
+  const until = realtimeSuppressUntil.get(queueKey);
+  if (!until) return false;
+  if (Date.now() < until) return true;
+  realtimeSuppressUntil.delete(queueKey);
+  return false;
+}
+
 // Deletes whatever message is currently tracked for this queue (if any) and
 // posts a brand-new one reflecting its current state, instead of editing in
 // place. Used for the open <-> closed transition so the card resurfaces at
@@ -745,6 +762,9 @@ async function postFreshQueueMessage(channel, queueKey, gamemode, { isHigh = fal
     components,
   });
   await setQueueMessage(queueKey, channel.id, newMessage.id);
+  // Suppress the realtime echo for this key — the bot just wrote to
+  // queue_closed and doesn't need onQueueStateChange to re-post the card.
+  suppressRealtimeFor(queueKey);
   return newMessage;
 }
 
@@ -2524,6 +2544,9 @@ client.once("ready", async () => {
         // normal queue, or "<gamemode>:<region>:high" for that region's
         // high queue.
         const queueKey = row.gamemode;
+        // Skip if the bot itself just wrote this change — postFreshQueueMessage
+        // already posted the card; the realtime echo would double-post it.
+        if (isRealtimeSuppressed(queueKey)) return;
         const [gamemode, region, maybeHigh] = queueKey.split(":");
         const isHigh = maybeHigh === "high";
         if (!gamemode || !region) return;
