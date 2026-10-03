@@ -1987,6 +1987,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.customId.startsWith("ticket_cat_")) {
+      if (isRestricted(interaction.member)) {
+        return interaction.reply({ content: "You are restricted from opening tickets.", ephemeral: true });
+      }
       const category = interaction.customId.replace("ticket_cat_", "");
       return interaction.showModal(buildTicketModal(category));
     }
