@@ -105,6 +105,10 @@ const PERMISSION_ROLE_IDS = {
   owner: "1555516243388399636",
 };
 
+// Players with this role are banned from joining queues or opening support
+// tickets. Checked before any queue/ticket action is allowed.
+const RESTRICTED_ROLE_ID = "1555849744843153451";
+
 // Tiers a tester can assign, best to worst. Matches tiers.js on the website.
 const TIER_OPTIONS = [
   "HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5",
@@ -195,6 +199,7 @@ module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
   REGIONS,
+  RESTRICTED_ROLE_ID,
   GAMEMODE_EMOJIS,
   GAMEMODE_PING_ROLE_NAMES,
   PERMISSION_ROLE_IDS,

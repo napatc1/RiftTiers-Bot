@@ -47,6 +47,7 @@ const {
   parseChannelName,
   gamemodeForChannelName,
   regionForChannelName,
+  RESTRICTED_ROLE_ID,
 } = require("./config");
 const {
   supabase,
@@ -121,6 +122,10 @@ const testerRoleNames = (process.env.TESTER_ROLE_NAMES || "Tester")
 const managerRoleNames = (process.env.MANAGER_ROLE_NAMES || "Manager")
   .split(",")
   .map((r) => r.trim().toLowerCase());
+
+function isRestricted(member) {
+  return member.roles.cache.has(RESTRICTED_ROLE_ID);
+}
 
 function isTester(member) {
   return member.roles.cache.some((r) =>
@@ -1971,6 +1976,9 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isButton()) {
     // ---------- #request-support: open a ticket ----------
     if (interaction.customId === "request_open_ticket") {
+      if (isRestricted(interaction.member)) {
+        return interaction.reply({ content: "You are restricted from opening support tickets.", ephemeral: true });
+      }
       return interaction.reply({
         content: "What's this about?",
         components: [buildTicketCategoryButtons()],
@@ -2182,6 +2190,9 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.customId === "queue_join") {
+      if (isRestricted(interaction.member)) {
+        return interaction.reply({ content: "You are restricted from joining queues.", ephemeral: true });
+      }
       const verifiedUsername = await getVerifiedUsername(interaction.user.id);
       if (!verifiedUsername) {
         return interaction.reply({
@@ -2363,6 +2374,9 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.customId === "highqueue_join") {
       const testerJoiningHigh = isTester(interaction.member);
 
+      if (!testerJoiningHigh && isRestricted(interaction.member)) {
+        return interaction.reply({ content: "You are restricted from joining queues.", ephemeral: true });
+      }
       if (!testerJoiningHigh && await isQueueClosed(highKey)) {
         return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
       }
@@ -2541,6 +2555,9 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---------- #request-test: gamemode picker ----------
   if (interaction.isStringSelectMenu() && interaction.customId === "request_test_gamemode") {
+    if (isRestricted(interaction.member)) {
+      return interaction.reply({ content: "You are restricted from joining queues.", ephemeral: true });
+    }
     const channelName = interaction.values[0];
     const gamemode = GAMEMODE_CHANNELS[channelName];
     if (!gamemode) {
