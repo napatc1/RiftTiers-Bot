@@ -1731,7 +1731,8 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      const currentRegion = await getQueueRegion(gamemode);
+      // Show the modal immediately — no async work before showModal or
+      // Discord's 3-second acknowledgement window will expire.
       const modal = new ModalBuilder()
         .setCustomId(`queue_open_modal:${gamemode}`)
         .setTitle("Open Queue — Select Region");
@@ -1742,7 +1743,6 @@ client.on("interactionCreate", async (interaction) => {
             .setLabel("Region (NA / EU / AS / ME / AU)")
             .setStyle(TextInputStyle.Short)
             .setPlaceholder("NA")
-            .setValue(currentRegion || "")
             .setRequired(true)
             .setMinLength(2)
             .setMaxLength(2)
@@ -1897,8 +1897,6 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
-      const highKey = `${gamemode}:high`;
-      const currentRegion = await getQueueRegion(highKey);
       const modal = new ModalBuilder()
         .setCustomId(`highqueue_open_modal:${gamemode}`)
         .setTitle("Open High Queue — Select Region");
@@ -1909,7 +1907,6 @@ client.on("interactionCreate", async (interaction) => {
             .setLabel("Region (NA / EU / AS / ME / AU)")
             .setStyle(TextInputStyle.Short)
             .setPlaceholder("NA")
-            .setValue(currentRegion || "")
             .setRequired(true)
             .setMinLength(2)
             .setMaxLength(2)
