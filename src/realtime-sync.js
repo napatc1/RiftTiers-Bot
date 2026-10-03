@@ -90,7 +90,9 @@ async function getOrCreateSupportCategory(guild) {
 }
 
 function ticketCategoryLabel(id) {
-  return { help: "Help", report: "Report a player", appeal: "Appeal a tier" }[id] || id;
+  return (
+    { help: "Help", report: "Report a player", appeal: "Appeal a tier", hightest: "High Tier Test Request" }[id] || id
+  );
 }
 
 // New support_tickets row -> create its Discord channel, post the opening

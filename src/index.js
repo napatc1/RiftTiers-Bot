@@ -32,6 +32,7 @@ const {
   TIERLIST_CHANNELS,
   REQUESTS_CATEGORY_NAME,
   REQUEST_TEST_CHANNEL_NAME,
+  REQUEST_HIGH_TEST_CHANNEL_NAME,
   REQUEST_SUPPORT_CHANNEL_NAME,
   TESTER_APPLICATION_CHANNEL_NAME,
   STAFF_CATEGORY_NAME,
@@ -325,6 +326,23 @@ function buildOpenTicketButton() {
   );
 }
 
+function buildRequestHighTestEmbed() {
+  return new EmbedBuilder()
+    .setAuthor({ name: "RyftTiers", iconURL: client.user ? client.user.displayAvatarURL() : undefined })
+    .setTitle("Request a High Tier Test")
+    .setColor(0xff8c3f)
+    .setDescription(
+      "Already **LT3 or better**? Click **Request High Test** below to open a ticket — staff will set up your test from there.\n\n" +
+        "Make sure you've verified first (`/verify` or the website's Verify tab)."
+    );
+}
+
+function buildRequestHighTestButton() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("ticket_cat_hightest").setLabel("Request High Test").setStyle(ButtonStyle.Primary)
+  );
+}
+
 function buildTicketCategoryButtons() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("ticket_cat_help").setLabel("Help").setStyle(ButtonStyle.Secondary),
@@ -333,28 +351,38 @@ function buildTicketCategoryButtons() {
   );
 }
 
+const TICKET_CATEGORY_LABELS = {
+  help: "Help",
+  report: "Report a player",
+  appeal: "Appeal a tier",
+  hightest: "High Tier Test Request",
+};
+
 function buildTicketModal(category) {
-  const label = { help: "Help", report: "Report a player", appeal: "Appeal a tier" }[category];
+  const label = TICKET_CATEGORY_LABELS[category];
+  const isHighTest = category === "hightest";
+
+  const subjectInput = new TextInputBuilder()
+    .setCustomId("subject")
+    .setLabel(isHighTest ? "Which gamemode?" : "Short summary")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(100)
+    .setRequired(true);
+  if (isHighTest) subjectInput.setPlaceholder("e.g. UHC");
+
+  const detailsInput = new TextInputBuilder()
+    .setCustomId("details")
+    .setLabel(isHighTest ? "Your IGN and current tier" : "Explain what's going on")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMaxLength(1000)
+    .setRequired(true);
+
   return new ModalBuilder()
     .setCustomId(`ticket_modal_${category}`)
     .setTitle(`New Ticket — ${label}`)
     .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("subject")
-          .setLabel("Short summary")
-          .setStyle(TextInputStyle.Short)
-          .setMaxLength(100)
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId("details")
-          .setLabel("Explain what's going on")
-          .setStyle(TextInputStyle.Paragraph)
-          .setMaxLength(1000)
-          .setRequired(true)
-      )
+      new ActionRowBuilder().addComponents(subjectInput),
+      new ActionRowBuilder().addComponents(detailsInput)
     );
 }
 
@@ -868,24 +896,6 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
 
 client.on("interactionCreate", async (interaction) => {
  try {
-  // /postqueue
-  if (interaction.isChatInputCommand() && interaction.commandName === "postqueue") {
-    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
-    if (!gamemode) {
-      return interaction.reply({
-        content: "This channel isn't set up as a tiertest channel in config.js.",
-        ephemeral: true,
-      });
-    }
-    await addQueueTester(gamemode, interaction.user.id);
-    await setQueueClosed(gamemode, false);
-    await setQueueLocked(gamemode, false);
-    await interaction.reply({ content: "Queue posted below.", ephemeral: true });
-    await postFreshQueueMessage(interaction.channel, gamemode, gamemode, {
-      content: `${getRolePing(interaction.guild, gamemode)}Queue is open!`,
-    });
-    return;
-  }
 
   // /setupqueues — one-time setup: creates any missing tiertest channels
   // and posts a fresh queue message in every channel that doesn't already
@@ -1042,6 +1052,7 @@ client.on("interactionCreate", async (interaction) => {
     const requestsCreated = [];
     const requestChannelSpecs = [
       { name: REQUEST_TEST_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestTestEmbed()], components: [buildRequestTestSelect()] }) },
+      { name: REQUEST_HIGH_TEST_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestHighTestEmbed()], components: [buildRequestHighTestButton()] }) },
       { name: REQUEST_SUPPORT_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestSupportEmbed()], components: [buildOpenTicketButton()] }) },
       { name: TESTER_APPLICATION_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildTesterApplicationEmbed()], components: [buildApplyButton()] }) },
     ];
@@ -1149,7 +1160,8 @@ client.on("interactionCreate", async (interaction) => {
       await lockChannelToTesters(interaction.guild, channel);
 
       const existingMsgInfo = getQueueMessage(gamemode);
-      if (existingMsgInfo) {
+      const existingHighMsgInfo = getQueueMessage(`${gamemode}:high`);
+      if (existingMsgInfo && existingHighMsgInfo) {
         skipped.push(channelName);
         continue;
       }
@@ -1159,15 +1171,29 @@ client.on("interactionCreate", async (interaction) => {
       // track of the queue message, per channel.send() below, doesn't
       // re-spam this too... except it will, same as the queue message
       // itself, since neither is tracked in Supabase. Acceptable for now.
-      const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
-      await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
+      if (!existingMsgInfo) {
+        const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+        await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
 
-      // New queues start CLOSED — staff open them explicitly (the Open
-      // Queue button or /postqueue) when they're actually ready to test. No
-      // ping here since there's nothing to join yet.
-      await setQueueClosed(gamemode, true);
-      await setQueueLocked(gamemode, false);
-      await postFreshQueueMessage(channel, gamemode, gamemode);
+        // New queues start CLOSED — staff open them explicitly (the Open
+        // Queue button) when they're actually ready to test. No ping here
+        // since there's nothing to join yet.
+        await setQueueClosed(gamemode, true);
+        await setQueueLocked(gamemode, false);
+        await postFreshQueueMessage(channel, gamemode, gamemode);
+      }
+
+      // Same for the high queue (LT3+) — its own tracked message in the
+      // same channel, also starting closed. Posted independently so
+      // re-running /setupqueues backfills it even if the regular queue
+      // message already existed from before this was added.
+      if (!existingHighMsgInfo) {
+        const highKey = `${gamemode}:high`;
+        await setQueueClosed(highKey, true);
+        await setQueueLocked(highKey, false);
+        await postFreshQueueMessage(channel, highKey, gamemode, { isHigh: true });
+      }
+
       posted.push(channelName);
     }
 
@@ -1442,27 +1468,6 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // /posthighqueue
-  if (interaction.isChatInputCommand() && interaction.commandName === "posthighqueue") {
-    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
-    if (!gamemode) {
-      return interaction.reply({
-        content: "This channel isn't set up as a tiertest channel in config.js.",
-        ephemeral: true,
-      });
-    }
-    const highKey = `${gamemode}:high`;
-    await addQueueTester(highKey, interaction.user.id);
-    await setQueueClosed(highKey, false);
-    await setQueueLocked(highKey, false);
-    await interaction.reply({ content: "High queue posted below.", ephemeral: true });
-    await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
-      isHigh: true,
-      content: `${getRolePing(interaction.guild, gamemode)}High queue is open!`,
-    });
-    return;
-  }
-
   // /clearcooldown
   if (interaction.isChatInputCommand() && interaction.commandName === "clearcooldown") {
     if (!canManageCooldowns(interaction.member)) {
@@ -1637,14 +1642,10 @@ client.on("interactionCreate", async (interaction) => {
       }
       const [, , gamemode, testeeId] = interaction.customId.split("_");
 
-      const verifiedUsername = await getVerifiedUsername(testeeId);
-      if (!verifiedUsername) {
-        return interaction.reply({
-          content: `<@${testeeId}> hasn't linked a Minecraft username yet. They need to run \`/verify username:<their IGN>\` before a result can be submitted.`,
-          ephemeral: true,
-        });
-      }
-
+      // Show the modal immediately — no async work (DB calls, etc.) before
+      // showModal, or Discord's 3-second acknowledgement window expires and
+      // the tester sees "didn't respond in time". The verified-username
+      // check happens on the modal submit instead (submit_result_ handler).
       const modal = new ModalBuilder()
         .setCustomId(`submit_result_${gamemode}_${testeeId}`)
         .setTitle(`Submit ${gamemode.toUpperCase()} Result`);

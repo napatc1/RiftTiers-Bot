@@ -501,7 +501,7 @@ grant execute on function join_queue, leave_queue, join_testing, leave_testing,
 create table if not exists support_tickets (
   id bigint generated always as identity primary key,
   player_id bigint not null references players(id) on delete cascade,
-  category text not null check (category in ('help', 'report', 'appeal')),
+  category text not null check (category in ('help', 'report', 'appeal', 'hightest')),
   subject text not null,
   status text not null default 'open' check (status in ('open', 'closed')),
   discord_channel_id text,
@@ -526,6 +526,12 @@ alter table support_messages add column if not exists edited_at timestamptz;
 alter table support_messages add column if not exists discord_message_id text;
 create unique index if not exists support_messages_discord_message_id_key
   on support_messages (discord_message_id) where discord_message_id is not null;
+
+-- Widen the category check to allow 'hightest' (request-high-test) on a
+-- table created before this category existed.
+alter table support_tickets drop constraint if exists support_tickets_category_check;
+alter table support_tickets add constraint support_tickets_category_check
+  check (category in ('help', 'report', 'appeal', 'hightest'));
 
 alter table support_tickets enable row level security;
 alter table support_messages enable row level security;
@@ -557,7 +563,7 @@ begin
   if v_player_id is null then
     raise exception 'not logged in';
   end if;
-  if p_category not in ('help', 'report', 'appeal') then
+  if p_category not in ('help', 'report', 'appeal', 'hightest') then
     raise exception 'invalid category';
   end if;
 

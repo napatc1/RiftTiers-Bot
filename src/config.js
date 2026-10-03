@@ -86,6 +86,7 @@ const TIERLIST_CHANNELS = [
 // buttons/select menu posted into them, not by typing.
 const REQUESTS_CATEGORY_NAME = "Requests";
 const REQUEST_TEST_CHANNEL_NAME = "request-test";
+const REQUEST_HIGH_TEST_CHANNEL_NAME = "request-high-test";
 const REQUEST_SUPPORT_CHANNEL_NAME = "request-support";
 const TESTER_APPLICATION_CHANNEL_NAME = "tester-application";
 
@@ -144,6 +145,7 @@ module.exports = {
   TIERLIST_CHANNELS,
   REQUESTS_CATEGORY_NAME,
   REQUEST_TEST_CHANNEL_NAME,
+  REQUEST_HIGH_TEST_CHANNEL_NAME,
   REQUEST_SUPPORT_CHANNEL_NAME,
   TESTER_APPLICATION_CHANNEL_NAME,
   STAFF_CATEGORY_NAME,

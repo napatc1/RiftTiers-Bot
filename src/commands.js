@@ -5,12 +5,6 @@ const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
 const commands = [
   new SlashCommandBuilder()
-    .setName("postqueue")
-    .setDescription(
-      "Post the tier-test queue message in this channel (run once per channel)."
-    ),
-
-  new SlashCommandBuilder()
     .setName("verify")
     .setDescription("Link your Discord account to your Minecraft username.")
     .addStringOption((opt) =>
@@ -59,12 +53,6 @@ const commands = [
     .setName("postverifyinfo")
     .setDescription(
       "Post step-by-step account-linking instructions to the verify-info channel."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("posthighqueue")
-    .setDescription(
-      "Post a HIGH tier-test queue (LT3 and above only) in this channel."
     ),
 
   new SlashCommandBuilder()
