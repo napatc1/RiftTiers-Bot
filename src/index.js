@@ -762,9 +762,6 @@ async function postFreshQueueMessage(channel, queueKey, gamemode, { isHigh = fal
     components,
   });
   await setQueueMessage(queueKey, channel.id, newMessage.id);
-  // Suppress the realtime echo for this key — the bot just wrote to
-  // queue_closed and doesn't need onQueueStateChange to re-post the card.
-  suppressRealtimeFor(queueKey);
   return newMessage;
 }
 
@@ -1240,6 +1237,7 @@ client.on("interactionCreate", async (interaction) => {
           // New queues start CLOSED — staff open them explicitly (the Open
           // Queue button) when they're actually ready to test. No ping here
           // since there's nothing to join yet.
+          suppressRealtimeFor(queueKey);
           await setQueueClosed(queueKey, true);
           await setQueueLocked(queueKey, false);
           await postFreshQueueMessage(channel, queueKey, gamemode);
@@ -1250,6 +1248,7 @@ client.on("interactionCreate", async (interaction) => {
         // re-running /setupqueues backfills it even if the regular queue
         // message already existed from before this was added.
         if (!existingHighMsgInfo) {
+          suppressRealtimeFor(highKey);
           await setQueueClosed(highKey, true);
           await setQueueLocked(highKey, false);
           await postFreshQueueMessage(channel, highKey, gamemode, { isHigh: true });
@@ -1313,6 +1312,14 @@ client.on("interactionCreate", async (interaction) => {
 
       // Build the list of (gamemode, region) pairs to process.
       const pairs = GAMEMODES.flatMap((gm) => REGIONS.map((r) => ({ gamemode: gm, region: r })));
+
+      // Pre-suppress realtime for every queue key we're about to write to,
+      // so the flood of setQueueClosed/setQueueLocked events doesn't trigger
+      // onQueueStateChange and double/triple-post cards into every channel.
+      for (const { gamemode, region } of pairs) {
+        suppressRealtimeFor(`${gamemode}:${region}`, 10000);
+        suppressRealtimeFor(`${gamemode}:${region}:high`, 10000);
+      }
 
       // Process all channels in parallel — purge, rename, repost.
       const results = await Promise.all(
@@ -2002,6 +2009,7 @@ client.on("interactionCreate", async (interaction) => {
       try {
         const check = await requireOwnRegion(interaction.member, interaction.user.id);
         if (!check.ok) return interaction.editReply({ content: check.message });
+        suppressRealtimeFor(queueKey);
         await setQueueClosed(queueKey, false);
         await setQueueLocked(queueKey, false);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode, {
@@ -2040,6 +2048,7 @@ client.on("interactionCreate", async (interaction) => {
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
       if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
       await interaction.reply({ content: "Closing the queue.", ephemeral: true });
+      suppressRealtimeFor(queueKey);
       await setQueueClosed(queueKey, true);
       await setQueueLocked(queueKey, false);
       await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
@@ -2183,6 +2192,7 @@ client.on("interactionCreate", async (interaction) => {
       try {
         const check = await requireOwnRegion(interaction.member, interaction.user.id);
         if (!check.ok) return interaction.editReply({ content: check.message });
+        suppressRealtimeFor(highKey);
         await setQueueClosed(highKey, false);
         await setQueueLocked(highKey, false);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
@@ -2218,6 +2228,7 @@ client.on("interactionCreate", async (interaction) => {
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
       if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
       await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
+      suppressRealtimeFor(highKey);
       await setQueueClosed(highKey, true);
       await setQueueLocked(highKey, false);
       await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
