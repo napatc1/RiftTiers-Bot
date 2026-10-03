@@ -1299,11 +1299,9 @@ client.on("interactionCreate", async (interaction) => {
       (c) => c.type === ChannelType.GuildText && c.name === "commands"
     );
 
-    const report = [];
     try {
+      // Delete leftover pre-region channels first (serial, few of these).
       for (const gamemode of GAMEMODES) {
-        // Delete any leftover pre-region channel for this gamemode — it's
-        // fully replaced by the per-region channels below.
         const base = baseChannelName(gamemode);
         const legacyChannels = interaction.guild.channels.cache.filter(
           (c) => c.type === ChannelType.GuildText && base && c.name.endsWith(base) && !parseChannelName(c.name)
@@ -1311,8 +1309,14 @@ client.on("interactionCreate", async (interaction) => {
         for (const legacy of legacyChannels.values()) {
           await legacy.delete().catch((err) => console.error(`[resetqueues] couldn't delete legacy #${legacy.name}:`, err.message));
         }
+      }
 
-        for (const region of REGIONS) {
+      // Build the list of (gamemode, region) pairs to process.
+      const pairs = GAMEMODES.flatMap((gm) => REGIONS.map((r) => ({ gamemode: gm, region: r })));
+
+      // Process all channels in parallel — purge, rename, repost.
+      const results = await Promise.all(
+        pairs.map(async ({ gamemode, region }) => {
           const targetName = regionChannelName(gamemode, region);
           const matches = [
             ...interaction.guild.channels.cache
@@ -1325,18 +1329,17 @@ client.on("interactionCreate", async (interaction) => {
               .values(),
           ];
           if (matches.length === 0) {
-            report.push(`**${gamemode} (${region})**: no channel found, skipped.`);
-            continue;
+            return `**${gamemode} (${region})**: no channel found, skipped.`;
           }
 
-          // Keep whichever channel is already correctly named (if any),
-          // otherwise just the first one found; delete the rest.
           matches.sort((a, b) => (a.name === targetName ? -1 : b.name === targetName ? 1 : 0));
           const [keep, ...extras] = matches;
 
-          for (const extra of extras) {
-            await extra.delete().catch((err) => console.error(`[resetqueues] couldn't delete #${extra.name}:`, err.message));
-          }
+          await Promise.all(
+            extras.map((extra) =>
+              extra.delete().catch((err) => console.error(`[resetqueues] couldn't delete #${extra.name}:`, err.message))
+            )
+          );
 
           const categoryName = queueCategoryName(gamemode);
           let category = interaction.guild.channels.cache.find(
@@ -1353,37 +1356,25 @@ client.on("interactionCreate", async (interaction) => {
           }
           await lockChannelToTesters(interaction.guild, keep);
 
-          // Purge every message in the channel — duplicates, old pings, all
-          // of it — so it starts completely clean. bulkDelete only handles
-          // messages under 14 days old and up to 100 at a time; loop until
-          // there's nothing left or it stops making progress.
+          // Purge all messages — bulkDelete handles up to 100 at a time for
+          // messages under 14 days; older ones are deleted one by one.
           let purged = 0;
           for (let i = 0; i < 20; i++) {
             const batch = await keep.messages.fetch({ limit: 100 }).catch(() => null);
             if (!batch || batch.size === 0) break;
-            const deletable = batch.filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
-            if (deletable.size > 0) {
-              const result = await keep.bulkDelete(deletable, true).catch(() => null);
+            const fresh = batch.filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
+            if (fresh.size > 0) {
+              const result = await keep.bulkDelete(fresh, true).catch(() => null);
               purged += result ? result.size : 0;
               if (!result || result.size === 0) {
-                // Nothing bulk-deletable left (likely all >14 days) — delete
-                // the rest one at a time instead of looping forever.
-                for (const m of batch.values()) {
-                  await m.delete().catch(() => {});
-                  purged++;
-                }
+                for (const m of batch.values()) { await m.delete().catch(() => {}); purged++; }
                 break;
               }
             } else {
-              for (const m of batch.values()) {
-                await m.delete().catch(() => {});
-                purged++;
-              }
+              for (const m of batch.values()) { await m.delete().catch(() => {}); purged++; }
             }
           }
 
-          // Drop any stale tracked message (it's gone now either way) and
-          // reset the queue to closed before posting fresh cards.
           const queueKey = `${gamemode}:${region}`;
           const highKey = `${queueKey}:high`;
           await deleteQueueMessage(queueKey);
@@ -1398,15 +1389,14 @@ client.on("interactionCreate", async (interaction) => {
           await postFreshQueueMessage(keep, queueKey, gamemode);
           await postFreshQueueMessage(keep, highKey, gamemode, { isHigh: true });
 
-          report.push(
-            `**${gamemode} (${region})**: kept #${keep.name}${extras.length ? ` (deleted ${extras.length} duplicate channel${extras.length === 1 ? "" : "s"})` : ""}, purged ${purged} message${purged === 1 ? "" : "s"}.`
-          );
-        }
-      }
-      return replyChunked(interaction, report.join("\n") || "Nothing to clean up.");
+          return `**${gamemode} (${region})**: kept #${keep.name}${extras.length ? ` (deleted ${extras.length} extra)` : ""}, purged ${purged} msg${purged === 1 ? "" : "s"}.`;
+        })
+      );
+
+      return replyChunked(interaction, results.join("\n") || "Nothing to clean up.");
     } catch (err) {
       console.error("[resetqueues] failed:", err.message);
-      return replyChunked(interaction, `${report.join("\n")}\n\nStopped early after an error — check bot logs: ${err.message}`);
+      return replyChunked(interaction, `Error: ${err.message}`);
     }
   }
 
