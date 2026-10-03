@@ -2046,15 +2046,27 @@ client.on("interactionCreate", async (interaction) => {
     if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
       return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
     }
-    await interaction.reply({ content: `Opening the queue on **${region}** servers.`, ephemeral: true });
-    const channel = interaction.channel;
-    await setQueueRegion(gamemode, region);
-    await setQueueClosed(gamemode, false);
-    await setQueueLocked(gamemode, false);
-    await postFreshQueueMessage(channel, gamemode, gamemode, {
-      content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
-    });
-    return;
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      // Find the tiertest channel by name — interaction.channel may be null after a modal.
+      const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
+      const channel = channelName
+        ? interaction.guild.channels.cache.find((c) => c.name === channelName)
+        : interaction.channel;
+      if (!channel) {
+        return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
+      }
+      await setQueueRegion(gamemode, region);
+      await setQueueClosed(gamemode, false);
+      await setQueueLocked(gamemode, false);
+      await postFreshQueueMessage(channel, gamemode, gamemode, {
+        content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
+      });
+      return interaction.editReply({ content: `Queue opened on **${region}** servers.` });
+    } catch (err) {
+      console.error("[queue_open_modal] failed:", err.message);
+      return interaction.editReply({ content: "Something went wrong opening the queue. Check bot logs." });
+    }
   }
 
   // Tester clicked "Open Queue" on the HIGH queue → chose a region → submit
@@ -2065,16 +2077,27 @@ client.on("interactionCreate", async (interaction) => {
     if (!["NA", "EU", "AS", "ME", "AU"].includes(region)) {
       return interaction.reply({ content: `"${region}" isn't a valid region. Use NA, EU, AS, ME, or AU.`, ephemeral: true });
     }
-    await interaction.reply({ content: `Opening the high queue on **${region}** servers.`, ephemeral: true });
-    const channel = interaction.channel;
-    await setQueueRegion(highKey, region);
-    await setQueueClosed(highKey, false);
-    await setQueueLocked(highKey, false);
-    await postFreshQueueMessage(channel, highKey, gamemode, {
-      isHigh: true,
-      content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
-    });
-    return;
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
+      const channel = channelName
+        ? interaction.guild.channels.cache.find((c) => c.name === channelName)
+        : interaction.channel;
+      if (!channel) {
+        return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
+      }
+      await setQueueRegion(highKey, region);
+      await setQueueClosed(highKey, false);
+      await setQueueLocked(highKey, false);
+      await postFreshQueueMessage(channel, highKey, gamemode, {
+        isHigh: true,
+        content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
+      });
+      return interaction.editReply({ content: `High queue opened on **${region}** servers.` });
+    } catch (err) {
+      console.error("[highqueue_open_modal] failed:", err.message);
+      return interaction.editReply({ content: "Something went wrong opening the high queue. Check bot logs." });
+    }
   }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith("ticket_modal_")) {
