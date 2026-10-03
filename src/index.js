@@ -1036,16 +1036,12 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     const staffAppEmbed = new EmbedBuilder()
-      .setTitle("⟡ RYFTTIERS — Staff Application")
+      .setTitle("Apply to Join the Staff Team")
       .setColor(0x2f7fd6)
       .setDescription(
-        "Want to join the RyftTiers staff team? Click **Apply** below to submit your application.\n\n" +
-        "**Requirements:**\n" +
-        "- Active member of the community\n" +
-        "- Good standing (no active punishments)\n" +
-        "- Able to commit time to moderating\n" +
-        "- Familiar with the server rules and tier system\n\n" +
-        "Staff will review your application and reach out to you directly."
+        "Staff members help keep RyftTiers fair and running smoothly — moderating the server, overseeing tests, and making sure the tier system stays clean. If you're active, trustworthy, and know the server well, click **Apply** below.\n\n" +
+        "You'll be asked for your IGN, region, why you want to be staff, any previous moderation experience, and your availability. Staff reviews every application — you'll be contacted either way.\n\n" +
+        "**Please be honest.** A dishonest application will be denied."
       );
 
     const applyButton = new ButtonBuilder()
