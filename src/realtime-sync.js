@@ -7,7 +7,7 @@
 // website.
 const { EmbedBuilder, ChannelType, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const { supabase, ensurePlayerForDiscordUser } = require("./supabase");
-const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, tierRoleName } = require("./config");
+const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, tierRoleName, queueCategoryName } = require("./config");
 
 // channelId -> ticketId, kept in memory so messageCreate can cheaply tell
 // whether a message was typed in a ticket channel at all. Rebuilt on every
@@ -263,9 +263,163 @@ async function handleTicketChannelMessageDelete(message) {
   }
 }
 
+// ---------- test tickets from website ----------
+
+// When a tester clicks "Next / Pull" on the website, claim_next() inserts a
+// live_tests row with discord_ticket_channel_id = null. We catch that INSERT
+// here, create the Discord ticket channel (same style as the bot's own
+// ticket), write the channel id back so the website/bot know where it lives,
+// and also register the test in the in-memory activeTestingMap so the usual
+// Submit / Cancel buttons work from inside that channel.
+async function createTestTicketFromWebsite(guild, liveTest, { onActiveTestSet } = {}) {
+  try {
+    // Skip rows that already have a channel (e.g. created from Discord).
+    if (liveTest.discord_ticket_channel_id) return;
+
+    // Look up tester's discord_id from their player row.
+    const { data: testerPlayer } = await supabase
+      .from("players")
+      .select("discord_id, username")
+      .eq("id", liveTest.tester_id)
+      .maybeSingle();
+    if (!testerPlayer?.discord_id) {
+      console.warn("[realtime-sync] createTestTicketFromWebsite: tester has no discord_id, skipping");
+      return;
+    }
+
+    // Look up testee's player row.
+    const { data: testeePlayer } = await supabase
+      .from("players")
+      .select("discord_id, username, region")
+      .eq("id", liveTest.player_id)
+      .maybeSingle();
+
+    const testerMember = await guild.members.fetch(testerPlayer.discord_id).catch(() => null);
+    const testeeMember = testeePlayer?.discord_id
+      ? await guild.members.fetch(testeePlayer.discord_id).catch(() => null)
+      : null;
+
+    // Place the ticket under the gamemode's test category if it exists,
+    // otherwise fall back to no parent (placed at top level).
+    const categoryName = queueCategoryName(liveTest.gamemode);
+    const category = guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
+    );
+
+    // Build permission overwrites — tester + testee can see it, everyone else cannot.
+    const testerRoleIds = Object.values(PERMISSION_ROLE_IDS).filter(Boolean);
+    const overwrites = [
+      { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+      ...testerRoleIds.map((id) => ({
+        id,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+      })),
+    ];
+    if (testerMember) {
+      overwrites.push({
+        id: testerMember.id,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+      });
+    }
+    if (testeeMember) {
+      overwrites.push({
+        id: testeeMember.id,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages, PermissionsBitField.Flags.ReadMessageHistory],
+      });
+    }
+
+    const testeeName = testeePlayer?.username || "player";
+    const testerName = testerPlayer?.username || "tester";
+    const slug = testeeName.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24);
+    const channel = await guild.channels.create({
+      name: `ticket-${liveTest.gamemode}-${slug}`,
+      type: ChannelType.GuildText,
+      parent: category?.id || null,
+      permissionOverwrites: overwrites,
+    });
+
+    const testeeInfoLine = testeePlayer
+      ? `**IGN:** ${testeeName}\n**Region:** ${testeePlayer.region || "Unknown"}\n`
+      : `**IGN:** Not linked to Discord\n`;
+
+    const testerMention = testerMember ? `<@${testerMember.id}>` : testerName;
+    const testeeMention = testeeMember ? `<@${testeeMember.id}>` : testeeName;
+
+    await channel.send({
+      content: `${testeeMention} ${testerMention}`,
+      embeds: [
+        new EmbedBuilder()
+          .setTitle(`${liveTest.gamemode.toUpperCase()} test in progress`)
+          .setDescription(
+            `Tester: ${testerMention}\nTestee: ${testeeMention}\n${testeeInfoLine}\n` +
+              `When the test is done, click **Submit Result** to save the tier and close this ticket. ` +
+              `Only testers and the testee can see this channel.\n\n` +
+              `_This ticket closes automatically after 2 hours if left open._`
+          )
+          .setColor(0xffd54a),
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`ticket_submit_${liveTest.gamemode}_${testeeMember?.id || "unknown"}`)
+            .setLabel("Submit Result")
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId("ticket_close")
+            .setLabel("Cancel Test")
+            .setStyle(ButtonStyle.Danger)
+        ),
+      ],
+    });
+
+    // Write the channel id back so the website can show it and the bot
+    // knows which channel to delete when the test ends.
+    await supabase
+      .from("live_tests")
+      .update({
+        discord_ticket_channel_id: channel.id,
+        tester_names: [testerName],
+      })
+      .eq("id", liveTest.id);
+
+    // Register in the in-memory map so Submit/Cancel buttons work.
+    if (onActiveTestSet) {
+      const queueKey = `${liveTest.gamemode}:${liveTest.region || "NA"}`;
+      onActiveTestSet(queueKey, {
+        ticketChannelId: channel.id,
+        testerIds: testerMember ? [testerMember.id] : [],
+        testerNames: [testerName],
+        testeeId: testeeMember?.id || null,
+        testeeName,
+        queueChannelId: null,
+        queueMessageId: null,
+        gamemode: liveTest.gamemode,
+        isHigh: false,
+      });
+    }
+
+    // Auto-close after 2 hours.
+    setTimeout(async () => {
+      try {
+        const stillExists = await guild.channels.fetch(channel.id).catch(() => null);
+        if (!stillExists) return;
+        await channel.send({ content: "This ticket has been open for 2 hours with no result submitted — closing it automatically." }).catch(() => {});
+        await supabase.from("live_tests").delete().eq("id", liveTest.id);
+        await channel.delete().catch((err) => console.error("[realtime-sync] failed to auto-delete stale ticket:", err.message));
+      } catch (err) {
+        console.error("[realtime-sync] auto-close error:", err.message);
+      }
+    }, 2 * 60 * 60 * 1000);
+
+    console.log(`[realtime-sync] created website-claimed ticket channel ${channel.name} for live_test ${liveTest.id}`);
+  } catch (err) {
+    console.error("[realtime-sync] createTestTicketFromWebsite failed:", err.message);
+  }
+}
+
 // ---------- wiring ----------
 
-async function initRealtimeSync(guild, { onQueueStateChange } = {}) {
+async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } = {}) {
   // Prime the in-memory channel map from whatever's already open, so a bot
   // restart doesn't lose track of existing ticket channels.
   const { data: openTickets } = await supabase
@@ -330,7 +484,16 @@ async function initRealtimeSync(guild, { onQueueStateChange } = {}) {
       .subscribe();
   }
 
-  console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages, queue_closed");
+  // Watch live_tests inserts from the website (discord_ticket_channel_id is
+  // null when claim_next() fires from the website — the bot fills it in).
+  supabase
+    .channel("bot-live-tests")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "live_tests" }, (payload) => {
+      createTestTicketFromWebsite(guild, payload.new, { onActiveTestSet });
+    })
+    .subscribe();
+
+  console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages, queue_closed, live_tests");
 }
 
 module.exports = {

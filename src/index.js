@@ -940,6 +940,30 @@ async function replyChunked(interaction, text, { isFollowUp = false } = {}) {
 client.on("interactionCreate", async (interaction) => {
  try {
 
+  // /sendrules — posts the server rules embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "sendrules") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const rulesEmbed = new EmbedBuilder()
+      .setTitle("⟡ RYFTTIERS")
+      .setDescription(
+        "# ᴛɪᴇʀʟɪsᴛ • ᴊᴀᴠᴀ • ʙᴇᴅʀᴏᴄᴋ • ᴄʀᴀᴄᴋᴇᴅ\n\n" +
+        "**«01 ┃ RESPECT»**\nNo harassment • racism • NSFW • toxicity\n\n" +
+        "**«02 ┃ TESTING»**\nNo cheating • autoclickers • scripts\nDon't interfere with tests\n\n" +
+        "**«03 ┃ RESULTS»**\nNo fake tiers • impersonation • result manipulation\n\n" +
+        "**«04 ┃ TESTERS»**\nStay fair and unbiased\nNo boosting or lowering players\n\n" +
+        "**«05 ┃ CHAT»**\nNo spam • advertising • unnecessary pings\n\n" +
+        "**«06 ┃ STAFF»**\nFollow staff instructions\nAppeals go through the proper system\n\n" +
+        "━━━━━━━━━━━━━━━━━━━━\n\n" +
+        "-# ⚔️ PLAY FAIR • EARN YOUR TIER ⚔️"
+      )
+      .setColor(0x2f7fd6);
+    await interaction.channel.send({ embeds: [rulesEmbed] });
+    return interaction.editReply({ content: "Rules posted!" });
+  }
+
   // /setupqueues — one-time setup: creates any missing tiertest channels
   // and posts a fresh queue message in every channel that doesn't already
   // have one tracked. Safe to re-run after adding a new gamemode to
@@ -2540,6 +2564,9 @@ client.once("ready", async () => {
   try {
     const guild = await client.guilds.fetch(guildId);
     await initRealtimeSync(guild, {
+      onActiveTestSet: (queueKey, info) => {
+        setActiveTesting(queueKey, info);
+      },
       onQueueStateChange: async (g, row) => {
         // row.gamemode is the queue key: "<gamemode>:<region>" for a
         // normal queue, or "<gamemode>:<region>:high" for that region's
