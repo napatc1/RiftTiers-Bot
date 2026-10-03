@@ -217,10 +217,10 @@ function buildVerifyInfoEmbed() {
   return new EmbedBuilder()
     .setTitle("Link your account to RyftTiers")
     .setDescription(
-      "Linking takes two quick steps — one on the website, one with the bot.\n\n" +
-        "**1. Log into the website**\nOpen the RyftTiers website and click **Login with Discord** in the top-right corner. Once you're logged in you can join queues, open a Support ticket, and (if you're a tester) claim tests and submit results, right from the site.\n\n" +
-        "**2. Link your Minecraft username**\nIn any channel here, run:\n```/verify username:<your IGN> platform:<Bedrock/Premium/Cracked>```\nThis tells the bot which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
-        "Once both are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
+      "Verification is done entirely on the website — no bot commands needed.\n\n" +
+        "**1. Log into the website**\nOpen the RyftTiers website and click **Login with Discord** in the top-right corner.\n\n" +
+        "**2. Link your Minecraft username**\nHead to the **Verify** tab and enter your IGN and platform (Bedrock/Premium/Cracked). This tells us which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
+        "Once both steps are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
     )
     .setColor(0x3fa0f5);
 }
@@ -257,7 +257,7 @@ function buildTestingRulesetEmbed() {
     .setColor(0x3fa0f5)
     .setDescription(
       "**Before you queue**\n" +
-        "• You must be verified (`/verify` or the website's Verify tab) before you can join any queue.\n" +
+        "• You must be verified (website's **Verify** tab) before you can join any queue.\n" +
         `• You're on a ${COOLDOWN_DAYS}-day cooldown after each result for that gamemode — you can't be retested sooner unless staff lifts it.\n` +
         "• Only queue in the region you'll actually be able to play on. Testers match you to testers in your set region.\n\n" +
         "**During a test**\n" +
@@ -299,7 +299,7 @@ function buildRequestTestEmbed() {
     .setColor(0xffd54a)
     .setDescription(
       "Pick a gamemode below and I'll point you to its queue channel. You'll join the actual queue from there — this is just the signpost.\n\n" +
-        "Make sure you've verified first (`/verify` or the website's Verify tab) — you can't join a queue until you have."
+        "Make sure you've verified first (website **Verify** tab) — you can't join a queue until you have."
     );
 }
 
@@ -341,7 +341,7 @@ function buildRequestHighTestEmbed() {
     .setColor(0xff8c3f)
     .setDescription(
       "Already **LT3 or better**? Click **Request High Test** below to open a ticket — staff will set up your test from there.\n\n" +
-        "Make sure you've verified first (`/verify` or the website's Verify tab)."
+        "Make sure you've verified first (website **Verify** tab)."
     );
 }
 
@@ -893,7 +893,7 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
   const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[testeePlatform] || "Unknown";
   const testeeInfoLine = testeeUsername
     ? `**IGN:** ${testeeUsername} (${platformLabel})\n**Region:** ${testeeRecord?.region || "Unverified/new"}\n`
-    : `**IGN:** Not verified — ask them to run \`/verify\`\n`;
+    : `**IGN:** Not verified — ask them to verify on the website\n`;
 
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
@@ -1592,20 +1592,10 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // /verify
+  // /verify — disabled; players must verify through the website
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
-    const username = interaction.options.getString("username", true).trim();
-    const platform = interaction.options.getString("platform", true);
-    if (/[.#$\[\]]/.test(username)) {
-      return interaction.reply({
-        content: `"${username}" isn't a valid Minecraft username — it can't contain ".", "#", "$", "[", or "]".`,
-        ephemeral: true,
-      });
-    }
-    await setVerifiedUsername(interaction.user.id, username, platform);
-    const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[platform];
     return interaction.reply({
-      content: `Linked your Discord account to Minecraft username **${username}** (${platformLabel}).`,
+      content: "Verification is done on the website — head to the **Verify** tab at https://ryft-tiers.web.app to link your Minecraft account.",
       ephemeral: true,
     });
   }
@@ -1905,7 +1895,7 @@ client.on("interactionCreate", async (interaction) => {
       username = await getVerifiedUsername(pingedPlayer.id);
       if (!username) {
         return interaction.reply({
-          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them run \`/verify\` first, or type the "username" option manually instead.`,
+          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them verify on the website first, or type the "username" option manually instead.`,
           ephemeral: true,
         });
       }
@@ -2179,7 +2169,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!tester?.region) {
         return {
           ok: false,
-          message: "You don't have a region set yet — run `/verify` or set your region on the website, then try again.",
+          message: "You don't have a region set yet — set your region on the website's Verify tab, then try again.",
         };
       }
       if (tester.region !== region) {
@@ -2196,7 +2186,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!verifiedUsername) {
         return interaction.reply({
           content:
-            "You need to verify before joining a queue — head to the **Verify** tab on the website (or run `/verify`) to link your Minecraft account first.",
+            "You need to verify before joining a queue — head to the **Verify** tab on the website to link your Minecraft account first.",
           ephemeral: true,
         });
       }
@@ -2383,7 +2373,7 @@ client.on("interactionCreate", async (interaction) => {
       const username = await getVerifiedUsername(interaction.user.id);
       if (!username) {
         return interaction.reply({
-          content: `You need to link your Minecraft account first — run \`/verify username:<your IGN>\`, then try joining again.`,
+          content: `You need to link your Minecraft account first — head to the **Verify** tab on the website, then try joining again.`,
           ephemeral: true,
         });
       }
@@ -2697,7 +2687,7 @@ client.on("interactionCreate", async (interaction) => {
     const name = await getVerifiedUsername(testeeId);
     if (!name) {
       return interaction.reply({
-        content: `<@${testeeId}> isn't verified anymore — they need to run \`/verify\` again before this can be saved.`,
+        content: `<@${testeeId}> isn't verified — they need to link their account on the website before this can be saved.`,
         ephemeral: true,
       });
     }
