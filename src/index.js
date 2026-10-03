@@ -1976,9 +1976,6 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isButton()) {
     // ---------- #request-support: open a ticket ----------
     if (interaction.customId === "request_open_ticket") {
-      if (isRestricted(interaction.member)) {
-        return interaction.reply({ content: "You are restricted from opening support tickets.", ephemeral: true });
-      }
       return interaction.reply({
         content: "What's this about?",
         components: [buildTicketCategoryButtons()],
@@ -1987,10 +1984,10 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.customId.startsWith("ticket_cat_")) {
-      if (isRestricted(interaction.member)) {
-        return interaction.reply({ content: "You are restricted from opening tickets.", ephemeral: true });
-      }
       const category = interaction.customId.replace("ticket_cat_", "");
+      if (isRestricted(interaction.member) && category !== "appeal") {
+        return interaction.reply({ content: "You are restricted from opening tickets. You may only appeal a punishment.", ephemeral: true });
+      }
       return interaction.showModal(buildTicketModal(category));
     }
 
