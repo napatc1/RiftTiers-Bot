@@ -253,7 +253,7 @@ async function handleTicketChannelMessageDelete(message) {
 
 // ---------- wiring ----------
 
-async function initRealtimeSync(guild) {
+async function initRealtimeSync(guild, { onQueueStateChange } = {}) {
   // Prime the in-memory channel map from whatever's already open, so a bot
   // restart doesn't lose track of existing ticket channels.
   const { data: openTickets } = await supabase
@@ -290,7 +290,19 @@ async function initRealtimeSync(guild) {
     })
     .subscribe();
 
-  console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages");
+  // Watch queue_closed so that opening/closing from the website (which calls
+  // the set_queue_closed RPC directly) is reflected in Discord immediately.
+  if (onQueueStateChange) {
+    supabase
+      .channel("bot-queue-closed")
+      .on("postgres_changes", { event: "*", schema: "public", table: "queue_closed" }, (payload) => {
+        const row = payload.new;
+        if (row) onQueueStateChange(guild, row);
+      })
+      .subscribe();
+  }
+
+  console.log("[realtime-sync] subscribed to player_tiers, support_tickets, support_messages, queue_closed");
 }
 
 module.exports = {

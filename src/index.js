@@ -2261,7 +2261,40 @@ client.once("ready", async () => {
 
   try {
     const guild = await client.guilds.fetch(guildId);
-    await initRealtimeSync(guild);
+    await initRealtimeSync(guild, {
+      onQueueStateChange: async (g, row) => {
+        // row.gamemode is the queue key (e.g. "vanilla" or "vanilla:high").
+        // Find the plain gamemode name for channel/embed lookup.
+        const queueKey = row.gamemode;
+        const isHigh = queueKey.endsWith(":high");
+        const gamemode = isHigh ? queueKey.replace(/:high$/, "") : queueKey;
+
+        // Find the tiertest channel for this gamemode by name.
+        const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
+        if (!channelName) return;
+        const channel = g.channels.cache.find(
+          (c) => c.type === ChannelType.GuildText && c.name === channelName
+        );
+        if (!channel) return;
+
+        const isNowOpen = !row.closed;
+        try {
+          if (isNowOpen) {
+            // Queue was opened from the website — post fresh open card with ping.
+            const pingContent = `${getRolePing(g, gamemode)}Queue is open!${row.region ? ` (${row.region})` : ""}`;
+            await postFreshQueueMessage(channel, queueKey, gamemode, {
+              isHigh,
+              content: pingContent,
+            });
+          } else {
+            // Queue was closed from the website — post fresh closed card.
+            await postFreshQueueMessage(channel, queueKey, gamemode, { isHigh });
+          }
+        } catch (err) {
+          console.error("[realtime-sync] onQueueStateChange failed:", err.message);
+        }
+      },
+    });
   } catch (err) {
     console.error("[realtime-sync] failed to start:", err.message);
   }
