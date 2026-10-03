@@ -9,6 +9,10 @@ const commands = [
     .setDescription("Post the server rules embed in the current channel. (Staff only)"),
 
   new SlashCommandBuilder()
+    .setName("poststaffapp")
+    .setDescription("Post the staff application embed to the staff-app channel. (Staff only)"),
+
+  new SlashCommandBuilder()
     .setName("verify")
     .setDescription("Link your Discord account to your Minecraft username.")
     .addStringOption((opt) =>

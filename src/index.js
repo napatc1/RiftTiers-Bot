@@ -935,6 +935,64 @@ async function replyChunked(interaction, text, { isFollowUp = false } = {}) {
   }
 }
 
+// ---------- high-results helpers ----------
+
+const HIGH_RESULTS_CHANNEL_ID = "1555554734880985102";
+
+// Tiers ordered best→worst. "Higher than LT3" means index < index of LT3.
+const TIER_ORDER = ["HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5"];
+function isHighTier(tier) {
+  const idx = TIER_ORDER.indexOf(tier);
+  const lt3Idx = TIER_ORDER.indexOf("LT3");
+  return idx !== -1 && idx < lt3Idx; // HT1/LT1/HT2/LT2/HT3
+}
+
+// Builds a fight-results section string for the high-results embed.
+// fightResultsRaw: multi-line string like "Won 4-3 vs. PlayerA\nLost 1-4 vs. PlayerB"
+// Returns an array of { heading, lines } groups based on detected tier prefixes,
+// or a flat list if no tier grouping is found.
+function parseFightSections(fightResultsRaw) {
+  if (!fightResultsRaw) return [];
+  const lines = fightResultsRaw.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines;
+}
+
+// Posts a result to the high-results channel.
+async function postHighResult(guild, { username, discordId, gamemode, previousTier, tier, region, fightResultsRaw, testerTag, isManual }) {
+  const channel = await guild.channels.fetch(HIGH_RESULTS_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const passed = isHighTier(tier);
+  const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
+  const status = passed ? `Promoted to **${tier}**` : `Failed **${tier}**`;
+  const statusVerb = passed ? "✅ Passed" : "❌ Failed";
+
+  // Header line (plain message above embed, matching the format in the screenshot)
+  const playerMention = discordId ? `<@${discordId}>` : `**${username}**`;
+  const headerLine = `${playerMention} **| ${gamemode.toUpperCase()} - ${statusVerb} ${tier}**${isManual ? " *(manual)*" : ""}`;
+
+  // Build embed description
+  let desc = `**Player:** ${username}\n**Region:** ${region}\n**Result:** ${changeText}\n`;
+  if (testerTag) desc += `**Tested by:** ${testerTag}\n`;
+
+  const fightLines = parseFightSections(fightResultsRaw);
+  if (fightLines.length > 0) {
+    desc += `\n**Fights:**\n${fightLines.map((l) => `> ${l}`).join("\n")}`;
+  }
+
+  const color = passed ? 0x4ade80 : 0xf87171;
+
+  await channel.send({
+    content: headerLine,
+    embeds: [
+      new EmbedBuilder()
+        .setDescription(desc)
+        .setColor(color)
+        .setTimestamp(),
+    ],
+  });
+}
+
 // ---------- interactions ----------
 
 client.on("interactionCreate", async (interaction) => {
@@ -962,6 +1020,66 @@ client.on("interactionCreate", async (interaction) => {
       .setColor(0x2f7fd6);
     await interaction.channel.send({ embeds: [rulesEmbed] });
     return interaction.editReply({ content: "Rules posted!" });
+  }
+
+  // /poststaffapp — posts the staff application embed to the staff-app channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "poststaffapp") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const STAFF_APP_CHANNEL_ID = "1555835615700852766";
+    const staffAppChannel = await interaction.guild.channels.fetch(STAFF_APP_CHANNEL_ID).catch(() => null);
+    if (!staffAppChannel) {
+      return interaction.editReply({ content: "Couldn't find the staff application channel." });
+    }
+
+    const staffAppEmbed = new EmbedBuilder()
+      .setTitle("⟡ RYFTTIERS — Staff Application")
+      .setColor(0x2f7fd6)
+      .setDescription(
+        "## Testing for HT1\n" +
+        "- **Phase 1:** Beat two LT2 opponents\n" +
+        "- **Phase 2:** Beat two HT2 opponents\n" +
+        "- **Phase 3:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 4:** Beat the HT1 Player. If successful, you will steal their title.\n\n" +
+
+        "## Testing for LT1\n" +
+        "- **Phase 1:** Beat two LT2 opponents\n" +
+        "- **Phase 2:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 3:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
+
+        "## Testing for LT2/HT2\n" +
+        "- **Phase 1:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 2:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
+
+        "## Testing for HT3\n" +
+        "- **Phase 1:** If you beat an evaluation tester 3-1 or better, you will be guaranteed a chance to test for HT3. With any other score, the tester decides whether you may test for HT3 or not.\n" +
+        "- **Phase 2:** You will be paired against a HT3 opponent, who you must beat in a First to 3 in order to receive HT3.\n\n" +
+
+        "## ❓ Missing opponents?\n" +
+        "- Replace each missing opponent with 2 lower tiered opponents.\n" +
+        "- If you are missing an opponent from your region, you will fight cross-regionally with ping equalization.\n" +
+        "- \"Equalized\" Ping must be within 20ms and within the same tick-range. A tick-range is 50ms, meaning a 99ms player vs. a 101ms player is not considered equalized.\n\n" +
+
+        "## ❌ Failed Tests\n" +
+        "- Failing a Tier Test will result in a 30 day cooldown\n" +
+        "- Failing a T2+ Tier Test to an opponent who ranks up within 10 days of your test in a condition that you might have otherwise passed will result in the test being re-opened.\n" +
+        "  - For example, If you are testing for HT2 and lose 3-4 to a LT2 who passes HT2, your test will be re-opened counting them as a HT2 instead."
+      );
+
+    const applyButton = new ButtonBuilder()
+      .setCustomId("request_high_test")
+      .setLabel("Apply for High Test")
+      .setStyle(ButtonStyle.Primary);
+
+    await staffAppChannel.send({
+      embeds: [staffAppEmbed],
+      components: [new ActionRowBuilder().addComponents(applyButton)],
+    });
+
+    return interaction.editReply({ content: "Staff application posted!" });
   }
 
   // /setupqueues — one-time setup: creates any missing tiertest channels
@@ -1790,6 +1908,22 @@ client.on("interactionCreate", async (interaction) => {
           });
         }
       }
+
+      // Also post to high-results if the tier is HT3 or above
+      if (isHighTier(tier)) {
+        const discordId = pingedPlayer?.id || null;
+        await postHighResult(interaction.guild, {
+          username,
+          discordId,
+          gamemode,
+          previousTier,
+          tier,
+          region: region || existing?.region || "?",
+          fightResultsRaw: "",
+          testerTag: `<@${interaction.user.id}>`,
+          isManual: true,
+        });
+      }
     } catch (err) {
       console.error(err);
       return interaction.reply({
@@ -1900,8 +2034,11 @@ client.on("interactionCreate", async (interaction) => {
       // showModal, or Discord's 3-second acknowledgement window expires and
       // the tester sees "didn't respond in time". The verified-username
       // check happens on the modal submit instead (submit_result_ handler).
+      const activeInfo = getActiveTestingByTicket(interaction.channelId);
+      const isHighTicket = !!(activeInfo?.isHigh);
+
       const modal = new ModalBuilder()
-        .setCustomId(`submit_result_${gamemode}_${testeeId}`)
+        .setCustomId(`submit_result_${gamemode}_${testeeId}${isHighTicket ? "_high" : ""}`)
         .setTitle(`Submit ${gamemode.toUpperCase()} Result`);
 
       const regionInput = new TextInputBuilder()
@@ -1921,6 +2058,16 @@ client.on("interactionCreate", async (interaction) => {
         new ActionRowBuilder().addComponents(regionInput),
         new ActionRowBuilder().addComponents(tierInput)
       );
+
+      if (isHighTicket) {
+        const fightsInput = new TextInputBuilder()
+          .setCustomId("fight_results")
+          .setLabel("Fight results (one per line, e.g. Won 4-3 vs. Steve)")
+          .setStyle(TextInputStyle.Paragraph)
+          .setPlaceholder("Won 4-3 vs. PlayerA\nLost 1-4 vs. PlayerB")
+          .setRequired(false);
+        modal.addComponents(new ActionRowBuilder().addComponents(fightsInput));
+      }
 
       return interaction.showModal(modal);
     }
@@ -2424,9 +2571,15 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith("submit_result_")) {
-    const [, , gamemode, testeeId] = interaction.customId.split("_");
+    const parts = interaction.customId.split("_");
+    // customId format: submit_result_<gamemode>_<testeeId> or submit_result_<gamemode>_<testeeId>_high
+    const isHighTicket = parts[parts.length - 1] === "high";
+    const [, , gamemode, testeeId] = parts;
     const region = interaction.fields.getTextInputValue("player_region").trim().toUpperCase();
     const tier = interaction.fields.getTextInputValue("player_tier").trim().toUpperCase();
+    const fightResultsRaw = isHighTicket
+      ? (interaction.fields.getTextInputValue("fight_results") || "").trim()
+      : "";
 
     const name = await getVerifiedUsername(testeeId);
     if (!name) {
@@ -2478,6 +2631,21 @@ client.on("interactionCreate", async (interaction) => {
             ],
           });
         }
+      }
+
+      // Post to high-results if this was a high ticket OR tier is HT3+
+      if (isHighTicket || isHighTier(tier)) {
+        await postHighResult(interaction.guild, {
+          username: name,
+          discordId: testeeId,
+          gamemode,
+          previousTier,
+          tier,
+          region,
+          fightResultsRaw,
+          testerTag: `<@${interaction.user.id}>`,
+          isManual: false,
+        });
       }
 
       const closedInfo = await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
