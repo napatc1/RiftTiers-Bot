@@ -1022,7 +1022,7 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Rules posted!" });
   }
 
-  // /poststaffapp — posts the staff application embed to the staff-app channel
+  // /poststaffapp — posts a staff application form embed with an Apply button
   if (interaction.isChatInputCommand() && interaction.commandName === "poststaffapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
@@ -1039,39 +1039,18 @@ client.on("interactionCreate", async (interaction) => {
       .setTitle("⟡ RYFTTIERS — Staff Application")
       .setColor(0x2f7fd6)
       .setDescription(
-        "## Testing for HT1\n" +
-        "- **Phase 1:** Beat two LT2 opponents\n" +
-        "- **Phase 2:** Beat two HT2 opponents\n" +
-        "- **Phase 3:** Beat two opponents in the same Tier as you\n" +
-        "- **Phase 4:** Beat the HT1 Player. If successful, you will steal their title.\n\n" +
-
-        "## Testing for LT1\n" +
-        "- **Phase 1:** Beat two LT2 opponents\n" +
-        "- **Phase 2:** Beat two opponents in the same Tier as you\n" +
-        "- **Phase 3:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
-
-        "## Testing for LT2/HT2\n" +
-        "- **Phase 1:** Beat two opponents in the same Tier as you\n" +
-        "- **Phase 2:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
-
-        "## Testing for HT3\n" +
-        "- **Phase 1:** If you beat an evaluation tester 3-1 or better, you will be guaranteed a chance to test for HT3. With any other score, the tester decides whether you may test for HT3 or not.\n" +
-        "- **Phase 2:** You will be paired against a HT3 opponent, who you must beat in a First to 3 in order to receive HT3.\n\n" +
-
-        "## ❓ Missing opponents?\n" +
-        "- Replace each missing opponent with 2 lower tiered opponents.\n" +
-        "- If you are missing an opponent from your region, you will fight cross-regionally with ping equalization.\n" +
-        "- \"Equalized\" Ping must be within 20ms and within the same tick-range. A tick-range is 50ms, meaning a 99ms player vs. a 101ms player is not considered equalized.\n\n" +
-
-        "## ❌ Failed Tests\n" +
-        "- Failing a Tier Test will result in a 30 day cooldown\n" +
-        "- Failing a T2+ Tier Test to an opponent who ranks up within 10 days of your test in a condition that you might have otherwise passed will result in the test being re-opened.\n" +
-        "  - For example, If you are testing for HT2 and lose 3-4 to a LT2 who passes HT2, your test will be re-opened counting them as a HT2 instead."
+        "Want to join the RyftTiers staff team? Click **Apply** below to submit your application.\n\n" +
+        "**Requirements:**\n" +
+        "- Active member of the community\n" +
+        "- Good standing (no active punishments)\n" +
+        "- Able to commit time to moderating\n" +
+        "- Familiar with the server rules and tier system\n\n" +
+        "Staff will review your application and reach out to you directly."
       );
 
     const applyButton = new ButtonBuilder()
-      .setCustomId("request_high_test")
-      .setLabel("Apply for High Test")
+      .setCustomId("staff_apply")
+      .setLabel("Apply")
       .setStyle(ButtonStyle.Primary);
 
     await staffAppChannel.send({
@@ -1080,6 +1059,51 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     return interaction.editReply({ content: "Staff application posted!" });
+  }
+
+  // /posthighrubric — posts the high-tier testing rubric to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "posthighrubric") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const rubricEmbed = new EmbedBuilder()
+      .setTitle("⟡ RYFTTIERS — High Tier Testing Rubric")
+      .setColor(0x2f7fd6)
+      .setDescription(
+        "## <:HT1:1361861674780459141> Testing for HT1\n" +
+        "- **Phase 1:** Beat two LT2 opponents\n" +
+        "- **Phase 2:** Beat two HT2 opponents\n" +
+        "- **Phase 3:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 4:** Beat the HT1 Player. If successful, you will steal their title.\n\n" +
+
+        "## <:LT1:1361861656912593077> Testing for LT1\n" +
+        "- **Phase 1:** Beat two LT2 opponents\n" +
+        "- **Phase 2:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 3:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
+
+        "## <:HT2:1361861639166755017> Testing for LT2/HT2\n" +
+        "- **Phase 1:** Beat two opponents in the same Tier as you\n" +
+        "- **Phase 2:** Achieve an equal or better overall score against 2 players in the Tier you are testing for. You must get a minimum of 3 rounds on each opponent.\n\n" +
+
+        "## <:HT3:1361861590961356891> Testing for HT3\n" +
+        "- **Phase 1:** If you beat an evaluation tester 3-1 or better, you will be guaranteed a chance to test for HT3. With any other score, the tester decides whether you may test for HT3 or not.\n" +
+        "- **Phase 2:** You will be paired against a HT3 opponent, who you must beat in a First to 3 in order to receive HT3.\n\n" +
+
+        "## ❓ Missing opponents?\n" +
+        "- Replace each missing opponent with 2 lower tiered opponents.\n" +
+        "- If you are missing an opponent from your region, you will fight cross-regionally with ping equalization.\n" +
+        "- \"Equalized\" Ping must be within 20ms and within the same tick-range. A tick-range is 50ms, meaning a 99ms player vs. a 101ms player is not considered equalized.\n\n" +
+
+        "## <:x_:1361861572846420038> Failed Tests\n" +
+        "- Failing a Tier Test will result in a 30 day cooldown\n" +
+        "- Failing a T2+ Tier Test to an opponent who ranks up within 10 days of your test in a condition that you might have otherwise passed will result in the test being re-opened.\n" +
+        "  - For example, If you are testing for HT2 and lose 3-4 to a LT2 who passes HT2, your test will be re-opened counting them as a HT2 instead."
+      );
+
+    await interaction.channel.send({ embeds: [rubricEmbed] });
+    return interaction.editReply({ content: "High tier rubric posted!" });
   }
 
   // /setupqueues — one-time setup: creates any missing tiertest channels
@@ -1978,6 +2002,42 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.showModal(buildTesterApplicationModal());
     }
 
+    if (interaction.customId === "staff_apply") {
+      const modal = new ModalBuilder()
+        .setCustomId("staff_apply_modal")
+        .setTitle("Staff Application")
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId("why")
+              .setLabel("Why do you want to be staff?")
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(true)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId("experience")
+              .setLabel("Previous moderation/staff experience")
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(false)
+          ),
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId("availability")
+              .setLabel("How often are you available?")
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+          )
+        );
+      return interaction.showModal(modal);
+    }
+
     if (interaction.customId.startsWith("tester_app_accept_") || interaction.customId.startsWith("tester_app_deny_")) {
       if (!canReviewApplications(interaction.member)) {
         return interaction.reply({ content: "Only managers/admins can review applications.", ephemeral: true });
@@ -2541,6 +2601,39 @@ client.on("interactionCreate", async (interaction) => {
     } catch (err) {
       console.error("Couldn't create ticket from Discord:", err.message);
       return interaction.editReply({ content: "Something went wrong creating that ticket. Try again or ping staff." });
+    }
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === "staff_apply_modal") {
+    const ign = interaction.fields.getTextInputValue("ign").trim();
+    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
+    const why = interaction.fields.getTextInputValue("why").trim();
+    const experience = interaction.fields.getTextInputValue("experience").trim();
+    const availability = interaction.fields.getTextInputValue("availability").trim();
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const reviewChannel = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
+      );
+      if (reviewChannel) {
+        const embed = new EmbedBuilder()
+          .setTitle("Staff Application")
+          .setColor(0x2f7fd6)
+          .addFields(
+            { name: "Discord", value: `<@${interaction.user.id}>`, inline: true },
+            { name: "IGN", value: ign, inline: true },
+            { name: "Region", value: region, inline: true },
+            { name: "Why staff?", value: why },
+            { name: "Previous experience", value: experience || "None provided" },
+            { name: "Availability", value: availability }
+          )
+          .setTimestamp();
+        await reviewChannel.send({ embeds: [embed] });
+      }
+      return interaction.editReply({ content: "Application submitted! Staff will review it and reach out to you." });
+    } catch (err) {
+      console.error("Couldn't submit staff application:", err.message);
+      return interaction.editReply({ content: "Something went wrong submitting that. Try again or ping staff." });
     }
   }
 
