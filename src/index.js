@@ -41,6 +41,8 @@ const {
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
   queueCategoryName,
+  displayChannelName,
+  gamemodeForChannelName,
 } = require("./config");
 const {
   supabase,
@@ -1140,18 +1142,29 @@ client.on("interactionCreate", async (interaction) => {
         categoriesCreated.push(categoryName);
       }
 
+      // Match by gamemode rather than literal name, so a channel already
+      // carrying its emoji prefix from a previous run isn't recreated.
+      const targetName = displayChannelName(gamemode) || channelName;
       let channel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === channelName
+        (c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name) === gamemode
       );
       if (!channel) {
         channel = await interaction.guild.channels.create({
-          name: channelName,
+          name: targetName,
           type: ChannelType.GuildText,
           parent: category.id,
         });
-        created.push(channelName);
-      } else if (channel.parentId !== category.id) {
-        await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
+        created.push(targetName);
+      } else {
+        if (channel.parentId !== category.id) {
+          await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
+        }
+        // Backfill the emoji prefix onto a channel set up before this existed.
+        if (channel.name !== targetName) {
+          await channel.setName(targetName).catch((err) =>
+            console.error(`[setupqueues] couldn't rename #${channel.name} to ${targetName}:`, err.message)
+          );
+        }
       }
 
       // Tiertest channels are read-only for everyone except testers and up —
@@ -1260,7 +1273,7 @@ client.on("interactionCreate", async (interaction) => {
     if (!isTester(interaction.member)) {
       return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
     }
-    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
+    const gamemode = gamemodeForChannelName(interaction.channel.name);
     if (!gamemode) {
       return interaction.reply({
         content: "Run this in a tiertest queue channel, not here.",
@@ -1319,7 +1332,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // /leavetesting
   if (interaction.isChatInputCommand() && interaction.commandName === "leavetesting") {
-    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
+    const gamemode = gamemodeForChannelName(interaction.channel.name);
     if (!gamemode) {
       return interaction.reply({
         content: "Run this in a tiertest queue channel, not here.",
@@ -1682,7 +1695,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // Everything below only applies inside actual gamemode queue channels.
-    const gamemode = GAMEMODE_CHANNELS[interaction.channel.name];
+    const gamemode = gamemodeForChannelName(interaction.channel.name);
     if (!gamemode) return;
 
     if (interaction.customId === "queue_join") {
@@ -2009,7 +2022,12 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.isStringSelectMenu() && interaction.customId === "request_test_gamemode") {
     const channelName = interaction.values[0];
     const gamemode = GAMEMODE_CHANNELS[channelName];
-    const channel = interaction.guild.channels.cache.find((c) => c.name === channelName);
+    // The select menu's value is the gamemode's plain base name, but the
+    // real channel may now carry an emoji prefix — match by gamemode, not
+    // literal name equality.
+    const channel = interaction.guild.channels.cache.find(
+      (c) => gamemodeForChannelName(c.name) === gamemode
+    );
     if (!gamemode || !channel) {
       return interaction.reply({ content: "Couldn't find that queue channel — ask staff to run /setupqueues.", ephemeral: true });
     }
@@ -2049,11 +2067,11 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.deferReply({ ephemeral: true });
     try {
-      // Find the tiertest channel by name — interaction.channel may be null after a modal.
-      const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
-      const channel = channelName
-        ? interaction.guild.channels.cache.find((c) => c.name === channelName)
-        : interaction.channel;
+      // Find the tiertest channel by gamemode — interaction.channel may be
+      // null after a modal, and the real channel may carry an emoji prefix.
+      const channel =
+        interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
+        interaction.channel;
       if (!channel) {
         return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
       }
@@ -2080,10 +2098,9 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.deferReply({ ephemeral: true });
     try {
-      const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
-      const channel = channelName
-        ? interaction.guild.channels.cache.find((c) => c.name === channelName)
-        : interaction.channel;
+      const channel =
+        interaction.guild.channels.cache.find((c) => gamemodeForChannelName(c.name) === gamemode) ||
+        interaction.channel;
       if (!channel) {
         return interaction.editReply({ content: "Couldn't find the queue channel — run /setupqueues first." });
       }
@@ -2292,11 +2309,10 @@ client.once("ready", async () => {
         const isHigh = queueKey.endsWith(":high");
         const gamemode = isHigh ? queueKey.replace(/:high$/, "") : queueKey;
 
-        // Find the tiertest channel for this gamemode by name.
-        const channelName = Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
-        if (!channelName) return;
+        // Find the tiertest channel for this gamemode (its real name may
+        // carry an emoji prefix).
         const channel = g.channels.cache.find(
-          (c) => c.type === ChannelType.GuildText && c.name === channelName
+          (c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name) === gamemode
         );
         if (!channel) return;
 
@@ -2326,11 +2342,11 @@ client.once("ready", async () => {
   // this takes effect right away without needing a /setupqueues re-run.
   try {
     const guild = await client.guilds.fetch(guildId);
-    for (const channelName of Object.keys(GAMEMODE_CHANNELS)) {
-      const channel = guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === channelName
-      );
-      if (channel) await lockChannelToTesters(guild, channel);
+    const tiertestChannels = guild.channels.cache.filter(
+      (c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name)
+    );
+    for (const channel of tiertestChannels.values()) {
+      await lockChannelToTesters(guild, channel);
     }
     console.log("[startup] tiertest channels locked to testers-and-up");
   } catch (err) {

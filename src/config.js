@@ -17,6 +17,48 @@ const GAMEMODES = [
   "vanilla", "axe", "sword", "mace", "nethop", "pot", "smp", "uhc", "cart",
 ];
 
+// Emoji prefixed onto each gamemode's tiertest channel name, e.g.
+// "💎-crystal-tiertest". /setupqueues creates (and renames existing
+// channels to) this form; a gamemode missing here just keeps its plain name.
+const GAMEMODE_EMOJIS = {
+  vanilla: "💎",
+  axe: "🪓",
+  sword: "⚔️",
+  mace: "🔨",
+  nethop: "🔥",
+  pot: "🧪",
+  smp: "🌍",
+  uhc: "❤️",
+  cart: "🛒",
+};
+
+// Reverse of GAMEMODE_CHANNELS: gamemode id -> its plain (no-emoji) base
+// channel name.
+function baseChannelName(gamemode) {
+  return Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
+}
+
+// The channel name /setupqueues actually creates/renames a gamemode's
+// tiertest channel to — its emoji (if any) prefixed onto the base name.
+// Returns null if the gamemode isn't in GAMEMODE_CHANNELS at all.
+function displayChannelName(gamemode) {
+  const base = baseChannelName(gamemode);
+  if (!base) return null;
+  const emoji = GAMEMODE_EMOJIS[gamemode];
+  return emoji ? `${emoji}-${base}` : base;
+}
+
+// Matches a real Discord channel name back to its gamemode id, accepting
+// either the old plain name ("crystal-tiertest") or the new emoji-prefixed
+// one ("💎-crystal-tiertest") — so a channel set up before emojis existed
+// still resolves correctly without being force-renamed first.
+function gamemodeForChannelName(name) {
+  for (const [base, gamemode] of Object.entries(GAMEMODE_CHANNELS)) {
+    if (name === base || name === displayChannelName(gamemode)) return gamemode;
+  }
+  return undefined;
+}
+
 // Discord role to ping when a queue opens for each gamemode, matched by
 // NAME rather than a hardcoded ID. This means the role just has to exist
 // (under this exact name) on whichever server the bot is running on —
@@ -134,6 +176,7 @@ function queueCategoryName(gamemode) {
 module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
+  GAMEMODE_EMOJIS,
   GAMEMODE_PING_ROLE_NAMES,
   PERMISSION_ROLE_IDS,
   TIER_OPTIONS,
@@ -154,4 +197,7 @@ module.exports = {
   DEFAULT_CHANNELS_TO_REMOVE,
   tierRoleName,
   queueCategoryName,
+  baseChannelName,
+  displayChannelName,
+  gamemodeForChannelName,
 };
