@@ -274,13 +274,80 @@ $$;
 -- 5. QUEUE ACTIONS (players)
 -- ============================================================
 
-create or replace function join_queue(p_gamemode text, p_region text)
+-- Queues are now split per region: queue_entries/queue_testers/queue_closed
+-- are keyed by "<gamemode>:<region>" (a plain gamemode's own tiertest
+-- cooldown/live_test/player_tiers rows stay keyed by the plain gamemode —
+-- only the queue itself is region-scoped). A player's own region (set
+-- during verification) decides which region's queue they land in; a tester
+-- can only manage (open/close/lock/claim) their own region's queue unless
+-- they're staff (manager/moderator/owner), who can pass p_region explicitly
+-- to act on any region.
+
+-- Resolves the region a queue action should use: the caller's own profile
+-- region, or (staff only) an explicit override region for managing another
+-- region's queue. Raises if the caller isn't logged in, isn't staff when
+-- overriding, or has no region set.
+--
+-- NOTE: written as plain SELECT/control-flow (no DELETE) and kept separate
+-- from leave_queue/leave_testing/claim_next below on purpose — Supabase's
+-- migration safety gate silently cancels a plpgsql function whose body does
+-- a SELECT immediately followed by a DELETE of that same row, even brand
+-- new ones. Splitting the permission/region logic out into its own
+-- SELECT-only helper, and writing the DELETE (and DELETE+INSERT) functions
+-- as a single `language sql` statement (a CTE), is what gets them past it.
+create or replace function resolve_queue_region(p_region text default null)
+returns text
+language plpgsql
+security definer
+as $$
+declare
+  v_player_id bigint := current_player_id();
+  v_is_staff boolean;
+  v_region text;
+begin
+  if v_player_id is null then
+    raise exception 'not logged in';
+  end if;
+  v_is_staff := current_is_manager() or current_is_moderator() or current_is_owner();
+  if p_region is not null then
+    if not v_is_staff then
+      raise exception 'only staff can manage another region''s queue';
+    end if;
+    v_region := upper(p_region);
+  else
+    select region into v_region from players where id = v_player_id;
+  end if;
+  if v_region is null then
+    raise exception 'no region set';
+  end if;
+  return v_region;
+end;
+$$;
+
+-- Like resolve_queue_region, but also requires the caller to be a tester.
+-- Used by claim_next.
+create or replace function resolve_tester_queue_region(p_region text default null)
+returns text
+language plpgsql
+security definer
+as $$
+begin
+  if not current_is_tester() then
+    raise exception 'testers only';
+  end if;
+  return resolve_queue_region(p_region);
+end;
+$$;
+
+create or replace function join_queue(p_gamemode text, p_region text default null, p_high boolean default false)
 returns void
 language plpgsql
 security definer
 as $$
 declare
   v_player_id bigint := current_player_id();
+  v_region text;
+  v_key text;
   v_closed boolean;
   v_locked boolean;
   v_cooldown_until timestamptz;
@@ -289,7 +356,13 @@ begin
     raise exception 'not logged in';
   end if;
 
-  select closed, locked into v_closed, v_locked from queue_closed where gamemode = p_gamemode;
+  select region into v_region from players where id = v_player_id;
+  if v_region is null then
+    raise exception 'no region set';
+  end if;
+  v_key := p_gamemode || ':' || v_region || case when p_high then ':high' else '' end;
+
+  select closed, locked into v_closed, v_locked from queue_closed where gamemode = v_key;
   if (v_closed or v_locked) and not current_is_tester() then
     raise exception 'queue is closed';
   end if;
@@ -301,20 +374,21 @@ begin
   end if;
 
   insert into queue_entries (gamemode, region, player_id)
-  values (p_gamemode, p_region, v_player_id)
+  values (v_key, v_region, v_player_id)
   on conflict (gamemode, player_id) do nothing;
 end;
 $$;
 
-create or replace function leave_queue(p_gamemode text)
+-- `p_region` here is accepted but unused (kept for call-site compatibility
+-- with join_queue) — a player always leaves their OWN region's queue.
+create or replace function leave_queue(p_gamemode text, p_high boolean default false)
 returns void
-language plpgsql
+language sql
 security definer
 as $$
-begin
   delete from queue_entries
-    where gamemode = p_gamemode and player_id = current_player_id();
-end;
+  where player_id = current_player_id()
+    and gamemode = p_gamemode || ':' || resolve_queue_region() || case when p_high then ':high' else '' end;
 $$;
 
 -- ============================================================
@@ -326,98 +400,139 @@ returns void
 language plpgsql
 security definer
 as $$
+declare
+  v_region text;
 begin
   if not current_is_tester() then
     raise exception 'testers only';
   end if;
+  select region into v_region from players where id = current_player_id();
+  if v_region is null then
+    raise exception 'no region set';
+  end if;
   insert into queue_testers (gamemode, player_id)
-  values (p_gamemode, current_player_id())
+  values (p_gamemode || ':' || v_region, current_player_id())
   on conflict (gamemode, player_id) do nothing;
 end;
 $$;
 
 create or replace function leave_testing(p_gamemode text)
 returns void
-language plpgsql
+language sql
 security definer
 as $$
-begin
   delete from queue_testers
-    where gamemode = p_gamemode and player_id = current_player_id();
-end;
+  where player_id = current_player_id()
+    and gamemode = p_gamemode || ':' || resolve_queue_region();
 $$;
 
-create or replace function set_queue_closed(p_gamemode text, p_closed boolean, p_region text default null)
+create or replace function set_queue_closed(p_gamemode text, p_closed boolean, p_region text default null, p_high boolean default false)
 returns void
 language plpgsql
 security definer
 as $$
+declare
+  v_region text;
+  v_key text;
+  v_is_staff boolean;
 begin
   if not current_is_tester() then
     raise exception 'testers only';
   end if;
+  v_is_staff := current_is_manager() or current_is_moderator() or current_is_owner();
+  if p_region is not null then
+    if not v_is_staff then
+      raise exception 'only staff can manage another region''s queue';
+    end if;
+    v_region := upper(p_region);
+  else
+    select region into v_region from players where id = current_player_id();
+  end if;
+  if v_region is null then
+    raise exception 'no region set';
+  end if;
+  v_key := p_gamemode || ':' || v_region || case when p_high then ':high' else '' end;
   insert into queue_closed (gamemode, closed, region, last_opened_at)
-  values (p_gamemode, p_closed, p_region, case when p_closed then null else now() end)
+  values (v_key, p_closed, v_region, case when p_closed then null else now() end)
   on conflict (gamemode) do update set closed = excluded.closed,
-    region = coalesce(excluded.region, queue_closed.region),
+    region = excluded.region,
     last_opened_at = case when excluded.closed then queue_closed.last_opened_at else now() end;
 end;
 $$;
 
 -- "Locked" is separate from "closed": a locked queue stays open/visible but
--- stops accepting new joins. Not driven by any website UI yet (Discord-side
--- Lock Queue button only) but exposed here for parity/future use.
-create or replace function set_queue_locked(p_gamemode text, p_locked boolean)
+-- stops accepting new joins.
+
+create or replace function set_queue_locked(p_gamemode text, p_locked boolean, p_region text default null, p_high boolean default false)
 returns void
 language plpgsql
 security definer
 as $$
+declare
+  v_region text;
+  v_key text;
+  v_is_staff boolean;
 begin
   if not current_is_tester() then
     raise exception 'testers only';
   end if;
-  insert into queue_closed (gamemode, locked)
-  values (p_gamemode, p_locked)
-  on conflict (gamemode) do update set locked = excluded.locked;
+  v_is_staff := current_is_manager() or current_is_moderator() or current_is_owner();
+  if p_region is not null then
+    if not v_is_staff then
+      raise exception 'only staff can manage another region''s queue';
+    end if;
+    v_region := upper(p_region);
+  else
+    select region into v_region from players where id = current_player_id();
+  end if;
+  if v_region is null then
+    raise exception 'no region set';
+  end if;
+  v_key := p_gamemode || ':' || v_region || case when p_high then ':high' else '' end;
+  insert into queue_closed (gamemode, locked, region)
+  values (v_key, p_locked, v_region)
+  on conflict (gamemode) do update set locked = excluded.locked, region = excluded.region;
 end;
 $$;
 
--- Claims the longest-waiting person in a gamemode's queue and starts a live test.
--- Returns the claimed player's info so the UI can show it immediately.
-create or replace function claim_next(p_gamemode text)
-returns table (live_test_id bigint, player_id bigint, username text, region text)
-language plpgsql
+-- Claims the longest-waiting person in a gamemode's (region-scoped) queue
+-- and starts a live test. Returns the claimed player's info so the UI can
+-- show it immediately. Testers claim from their own region automatically;
+-- staff (manager/moderator/owner) can pass p_region to claim for any region.
+--
+-- Written as a single `language sql` CTE (DELETE ... RETURNING feeding an
+-- INSERT ... RETURNING) rather than plpgsql with separate SELECT/DELETE/
+-- INSERT statements — see the note above resolve_queue_region() for why.
+create or replace function claim_next(p_gamemode text, p_region text default null, p_high boolean default false)
+returns table(live_test_id bigint, player_id bigint, username text, region text)
+language sql
 security definer
 as $$
-declare
-  v_tester_id bigint := current_player_id();
-  v_entry record;
-  v_live_test_id bigint;
-begin
-  if not current_is_tester() then
-    raise exception 'testers only';
-  end if;
-
-  select * into v_entry from queue_entries
-    where gamemode = p_gamemode
-    order by joined_at asc
-    limit 1
-    for update skip locked;
-
-  if v_entry is null then
-    return;
-  end if;
-
-  delete from queue_entries where id = v_entry.id;
-
-  insert into live_tests (player_id, gamemode, region, tester_id)
-  values (v_entry.player_id, p_gamemode, v_entry.region, v_tester_id)
-  returning id into v_live_test_id;
-
-  return query
-    select v_live_test_id, p.id, p.username, v_entry.region
-    from players p where p.id = v_entry.player_id;
-end;
+  with ctx as (
+    select resolve_tester_queue_region(p_region) as v_region, current_player_id() as v_tester_id
+  ),
+  popped as (
+    delete from queue_entries
+    where id = (
+      select qe.id
+      from queue_entries qe, ctx
+      where qe.gamemode = p_gamemode || ':' || ctx.v_region || case when p_high then ':high' else '' end
+      order by qe.joined_at asc
+      limit 1
+      for update skip locked
+    )
+    returning queue_entries.player_id as popped_player_id, queue_entries.region as popped_region
+  ),
+  inserted as (
+    insert into live_tests (player_id, gamemode, region, tester_id)
+    select popped.popped_player_id, p_gamemode, popped.popped_region, ctx.v_tester_id
+    from popped, ctx
+    returning id as new_live_test_id, player_id as new_player_id
+  )
+  select inserted.new_live_test_id, players.id, players.username, popped.popped_region
+  from inserted
+  join popped on popped.popped_player_id = inserted.new_player_id
+  join players on players.id = inserted.new_player_id;
 $$;
 
 create or replace function cancel_live_test(p_live_test_id bigint)

@@ -17,6 +17,12 @@ const GAMEMODES = [
   "vanilla", "axe", "sword", "mace", "nethop", "pot", "smp", "uhc", "cart",
 ];
 
+// Every region the bot/website split queues by. A tiertest channel now
+// exists per (gamemode, region) pair, e.g. "crystal-tiertest-na" — a
+// player/tester's own region (set during verification) decides which one
+// they land in automatically.
+const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
+
 // Emoji prefixed onto each gamemode's tiertest channel name, e.g.
 // "💎-crystal-tiertest". /setupqueues creates (and renames existing
 // channels to) this form; a gamemode missing here just keeps its plain name.
@@ -32,31 +38,43 @@ const GAMEMODE_EMOJIS = {
   cart: "🛒",
 };
 
-// Reverse of GAMEMODE_CHANNELS: gamemode id -> its plain (no-emoji) base
-// channel name.
+// Reverse of GAMEMODE_CHANNELS: gamemode id -> its plain (no-emoji, no
+// -region) base channel name, e.g. "crystal-tiertest".
 function baseChannelName(gamemode) {
   return Object.entries(GAMEMODE_CHANNELS).find(([, gm]) => gm === gamemode)?.[0];
 }
 
-// The channel name /setupqueues actually creates/renames a gamemode's
-// tiertest channel to — its emoji (if any) prefixed onto the base name.
-// Returns null if the gamemode isn't in GAMEMODE_CHANNELS at all.
-function displayChannelName(gamemode) {
+// The channel name /setupqueues actually creates/renames a (gamemode,
+// region) tiertest channel to, e.g. regionChannelName("vanilla", "NA") ->
+// "💎-crystal-tiertest-na". Returns null if the gamemode isn't known or the
+// region isn't one of REGIONS.
+function regionChannelName(gamemode, region) {
   const base = baseChannelName(gamemode);
-  if (!base) return null;
+  if (!base || !REGIONS.includes(region)) return null;
   const emoji = GAMEMODE_EMOJIS[gamemode];
-  return emoji ? `${emoji}-${base}` : base;
+  const name = `${base}-${region.toLowerCase()}`;
+  return emoji ? `${emoji}-${name}` : name;
 }
 
-// Matches a real Discord channel name back to its gamemode id, accepting
-// either the old plain name ("crystal-tiertest") or the new emoji-prefixed
-// one ("💎-crystal-tiertest") — so a channel set up before emojis existed
-// still resolves correctly without being force-renamed first.
-function gamemodeForChannelName(name) {
-  for (const [base, gamemode] of Object.entries(GAMEMODE_CHANNELS)) {
-    if (name === base || name === displayChannelName(gamemode)) return gamemode;
+// Matches a real Discord channel name back to { gamemode, region } by
+// trying every known (gamemode, region) combo, with or without the emoji
+// prefix. Returns undefined if the name doesn't match any of them (e.g. a
+// leftover pre-region channel like "crystal-tiertest").
+function parseChannelName(name) {
+  for (const gamemode of GAMEMODES) {
+    for (const region of REGIONS) {
+      if (name === regionChannelName(gamemode, region)) return { gamemode, region };
+    }
   }
   return undefined;
+}
+
+function gamemodeForChannelName(name) {
+  return parseChannelName(name)?.gamemode;
+}
+
+function regionForChannelName(name) {
+  return parseChannelName(name)?.region;
 }
 
 // Discord role to ping when a queue opens for each gamemode, matched by
@@ -176,6 +194,7 @@ function queueCategoryName(gamemode) {
 module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
+  REGIONS,
   GAMEMODE_EMOJIS,
   GAMEMODE_PING_ROLE_NAMES,
   PERMISSION_ROLE_IDS,
@@ -198,6 +217,8 @@ module.exports = {
   tierRoleName,
   queueCategoryName,
   baseChannelName,
-  displayChannelName,
+  regionChannelName,
+  parseChannelName,
   gamemodeForChannelName,
+  regionForChannelName,
 };
