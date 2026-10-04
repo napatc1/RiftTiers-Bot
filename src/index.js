@@ -735,7 +735,7 @@ async function refreshHighQueueMessage(interaction, highKey, gamemode) {
 // re-post the card a second time via onQueueStateChange.
 const realtimeSuppressUntil = new Map();
 
-function suppressRealtimeFor(queueKey, ms = 2000) {
+function suppressRealtimeFor(queueKey, ms = 15000) {
   realtimeSuppressUntil.set(queueKey, Date.now() + ms);
 }
 
