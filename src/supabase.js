@@ -301,8 +301,8 @@ async function formatQueue(queueKey) {
     .select("players!queue_entries_player_id_fkey(discord_id)")
     .eq("gamemode", queueKey)
     .order("joined_at", { ascending: true });
-  if (!data || data.length === 0) return "_Queue is empty._";
-  return data.map((e, i) => `${i + 1}. <@${e.players.discord_id}>`).join("\n");
+  if (!data || data.length === 0) return "**Queues**\n_Queue is empty._";
+  return "**Queues**\n" + data.map((e, i) => `${i + 1}. <@${e.players.discord_id}>`).join("\n");
 }
 
 async function isQueueClosed(queueKey) {
@@ -424,6 +424,16 @@ async function getQueueTesterIds(queueKey) {
     .select("players!queue_testers_player_id_fkey(discord_id)")
     .eq("gamemode", queueKey);
   return (data || []).map((t) => t.players.discord_id);
+}
+
+// Wipes all testers from a queue (called on queue close).
+async function clearQueueTesters(queueKey) {
+  await supabase.from("queue_testers").delete().eq("gamemode", queueKey);
+}
+
+// Wipes all queue entries (called on queue close).
+async function clearQueueEntries(queueKey) {
+  await supabase.from("queue_entries").delete().eq("gamemode", queueKey);
 }
 
 // ---------- in-memory, Discord-only bookkeeping ----------
@@ -634,6 +644,8 @@ module.exports = {
   addQueueTester,
   removeQueueTester,
   getQueueTesterIds,
+  clearQueueTesters,
+  clearQueueEntries,
   setActiveTesting,
   getActiveTesting,
   getActiveTestingByTicket,

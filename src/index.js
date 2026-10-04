@@ -80,6 +80,8 @@ const {
   addQueueTester,
   removeQueueTester,
   getQueueTesterIds,
+  clearQueueTesters,
+  clearQueueEntries,
   setActiveTesting,
   getActiveTesting,
   getActiveTestingByTicket,
@@ -2361,6 +2363,8 @@ client.on("interactionCreate", async (interaction) => {
       suppressRealtimeFor(queueKey);
       await setQueueClosed(queueKey, true);
       await setQueueLocked(queueKey, false);
+      await clearQueueTesters(queueKey);
+      await clearQueueEntries(queueKey);
       await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
       return;
     }
@@ -2568,6 +2572,8 @@ client.on("interactionCreate", async (interaction) => {
       suppressRealtimeFor(highKey);
       await setQueueClosed(highKey, true);
       await setQueueLocked(highKey, false);
+      await clearQueueTesters(highKey);
+      await clearQueueEntries(highKey);
       await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
       return;
     }
