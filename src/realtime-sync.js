@@ -9,6 +9,8 @@ const { EmbedBuilder, ChannelType, PermissionsBitField, ActionRowBuilder, Button
 const { supabase, ensurePlayerForDiscordUser } = require("./supabase");
 const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, tierRoleName, queueCategoryName } = require("./config");
 
+const VERIFIED_ROLE_ID = "1556203882529558539";
+
 // channelId -> ticketId, kept in memory so messageCreate can cheaply tell
 // whether a message was typed in a ticket channel at all. Rebuilt on every
 // boot from open tickets, and kept current by the support_tickets
@@ -23,6 +25,29 @@ function sanitizeChannelName(name) {
       .replace(/^-+|-+$/g, "")
       .slice(0, 80) || "player"
   );
+}
+
+// ---------- verified role ----------
+
+// Called when a players row is inserted or updated with a discord_id set.
+// Grants the Verified role so gated channels become visible.
+async function grantVerifiedRole(guild, discordId) {
+  if (!discordId) return;
+  try {
+    const member = await guild.members.fetch(discordId).catch(() => null);
+    if (!member) return;
+    const role = guild.roles.cache.get(VERIFIED_ROLE_ID);
+    if (!role) {
+      console.warn("[realtime-sync] Verified role not found:", VERIFIED_ROLE_ID);
+      return;
+    }
+    if (!member.roles.cache.has(VERIFIED_ROLE_ID)) {
+      await member.roles.add(role).catch(() => {});
+      console.log(`[realtime-sync] granted Verified role to ${discordId}`);
+    }
+  } catch (err) {
+    console.error("[realtime-sync] grantVerifiedRole failed:", err.message);
+  }
 }
 
 // ---------- tier roles ----------
@@ -434,6 +459,21 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
     .on("postgres_changes", { event: "*", schema: "public", table: "player_tiers" }, (payload) => {
       const row = payload.new;
       if (row) assignTierRole(guild, row.player_id, row.gamemode, row.tier);
+    })
+    .subscribe();
+
+  // Grant the Verified role whenever a player row is created or updated with
+  // a discord_id (i.e. when they link their account on the website).
+  supabase
+    .channel("bot-players-verified")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "players" }, (payload) => {
+      if (payload.new?.discord_id) grantVerifiedRole(guild, payload.new.discord_id);
+    })
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "players" }, (payload) => {
+      // Only fire when discord_id was just set (wasn't set before, now is).
+      if (payload.new?.discord_id && !payload.old?.discord_id) {
+        grantVerifiedRole(guild, payload.new.discord_id);
+      }
     })
     .subscribe();
 
