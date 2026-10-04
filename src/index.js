@@ -226,7 +226,7 @@ function buildVerifyInfoEmbed() {
     .setDescription(
       "Verification is done entirely on the website — no bot commands needed.\n\n" +
         "**1. Log into the website**\nOpen the RyftTiers website and click **Login with Discord** in the top-right corner.\n\n" +
-        "**2. Link your Minecraft username**\nHead to the **Verify** tab and enter your IGN and platform (Bedrock/Premium/Cracked). This tells us which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
+        "**2. Link your Minecraft username**\nHead to the **Verify** tab at https://napatc1.github.io/RiftTiers-Website/Verify and enter your IGN and platform (Bedrock/Premium/Cracked). This tells us which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
         "Once both steps are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
     )
     .setColor(0x3fa0f5);
@@ -264,7 +264,7 @@ function buildTestingRulesetEmbed() {
     .setColor(0x3fa0f5)
     .setDescription(
       "**Before you queue**\n" +
-        "• You must be verified (website's **Verify** tab) before you can join any queue.\n" +
+        "• You must be verified ([Verify tab](https://napatc1.github.io/RiftTiers-Website/Verify)) before you can join any queue.\n" +
         `• You're on a ${COOLDOWN_DAYS}-day cooldown after each result for that gamemode — you can't be retested sooner unless staff lifts it.\n` +
         "• Only queue in the region you'll actually be able to play on. Testers match you to testers in your set region.\n\n" +
         "**During a test**\n" +
@@ -306,7 +306,7 @@ function buildRequestTestEmbed() {
     .setColor(0xffd54a)
     .setDescription(
       "Pick a gamemode below and I'll point you to its queue channel. You'll join the actual queue from there — this is just the signpost.\n\n" +
-        "Make sure you've verified first (website **Verify** tab) — you can't join a queue until you have."
+        "Make sure you've verified first — <https://napatc1.github.io/RiftTiers-Website/Verify> — you can't join a queue until you have."
     );
 }
 
@@ -348,7 +348,7 @@ function buildRequestHighTestEmbed() {
     .setColor(0xff8c3f)
     .setDescription(
       "Already **LT3 or better**? Click **Request High Test** below to open a ticket — staff will set up your test from there.\n\n" +
-        "Make sure you've verified first (website **Verify** tab)."
+        "Make sure you've verified first — <https://napatc1.github.io/RiftTiers-Website/Verify>."
     );
 }
 
@@ -913,7 +913,7 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
   const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[testeePlatform] || "Unknown";
   const testeeInfoLine = testeeUsername
     ? `**IGN:** ${testeeUsername} (${platformLabel})\n**Region:** ${testeeRecord?.region || "Unverified/new"}\n`
-    : `**IGN:** Not verified — ask them to verify on the website\n`;
+    : `**IGN:** Not verified — ask them to verify at https://napatc1.github.io/RiftTiers-Website/Verify\n`;
 
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
@@ -1615,7 +1615,7 @@ client.on("interactionCreate", async (interaction) => {
   // /verify — disabled; players must verify through the website
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
     return interaction.reply({
-      content: "Verification is done on the website — head to the **Verify** tab at https://ryft-tiers.web.app to link your Minecraft account.",
+      content: "Verification is done on the website — head to https://napatc1.github.io/RiftTiers-Website/Verify to link your Minecraft account.",
       ephemeral: true,
     });
   }
@@ -1666,7 +1666,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({
         content: tester?.region
           ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
-          : "You don't have a region set yet — run `/verify` or set your region on the website, then try again.",
+          : "You don't have a region set yet — set your region at https://napatc1.github.io/RiftTiers-Website/Verify, then try again.",
         ephemeral: true,
       });
     }
@@ -1918,7 +1918,7 @@ client.on("interactionCreate", async (interaction) => {
       username = await getVerifiedUsername(pingedPlayer.id);
       if (!username) {
         return interaction.reply({
-          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them verify on the website first, or type the "username" option manually instead.`,
+          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them verify at https://napatc1.github.io/RiftTiers-Website/Verify first, or type the "username" option manually instead.`,
           ephemeral: true,
         });
       }
@@ -2230,7 +2230,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!tester?.region) {
         return {
           ok: false,
-          message: "You don't have a region set yet — set your region on the website's Verify tab, then try again.",
+          message: "You don't have a region set yet — set your region on the website: <https://napatc1.github.io/RiftTiers-Website/Verify> — then try again.",
         };
       }
       if (tester.region !== region) {
@@ -2250,14 +2250,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!verifiedUsername) {
         return interaction.reply({
           content:
-            "You need to verify before joining a queue — head to the **Verify** tab on the website to link your Minecraft account first.",
+            "You need to verify before joining a queue — link your account at https://napatc1.github.io/RiftTiers-Website/Verify first.",
           ephemeral: true,
         });
       }
       const joiner = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
       if (!joiner?.region) {
         return interaction.reply({
-          content: "Set your region first — head to the **Verify** tab on the website before joining a queue.",
+          content: "Set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify> before joining a queue.",
           ephemeral: true,
         });
       }
@@ -2464,7 +2464,7 @@ client.on("interactionCreate", async (interaction) => {
       const username = await getVerifiedUsername(interaction.user.id);
       if (!username) {
         return interaction.reply({
-          content: `You need to link your Minecraft account first — head to the **Verify** tab on the website, then try joining again.`,
+          content: `You need to link your Minecraft account first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify>, then try joining again.`,
           ephemeral: true,
         });
       }
@@ -2472,7 +2472,7 @@ client.on("interactionCreate", async (interaction) => {
       const player = await getPlayer(username);
       if (!player?.region) {
         return interaction.reply({
-          content: "Set your region first — head to the **Verify** tab on the website before joining a queue.",
+          content: "Set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify> before joining a queue.",
           ephemeral: true,
         });
       }
@@ -2670,7 +2670,7 @@ client.on("interactionCreate", async (interaction) => {
     const requester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
     if (!requester?.region) {
       return interaction.reply({
-        content: "You need to set your region first — head to the **Verify** tab on the website, then come back here.",
+        content: "You need to set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify>, then come back here.",
         ephemeral: true,
       });
     }
