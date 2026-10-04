@@ -2325,6 +2325,7 @@ client.on("interactionCreate", async (interaction) => {
         suppressRealtimeFor(queueKey);
         await setQueueClosed(queueKey, false);
         await setQueueLocked(queueKey, false);
+        await addQueueTester(queueKey, interaction.user.id);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode, {
           content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
         });
@@ -2537,6 +2538,7 @@ client.on("interactionCreate", async (interaction) => {
         suppressRealtimeFor(highKey);
         await setQueueClosed(highKey, false);
         await setQueueLocked(highKey, false);
+        await addQueueTester(highKey, interaction.user.id);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
           isHigh: true,
           content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
