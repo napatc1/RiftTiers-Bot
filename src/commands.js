@@ -17,27 +17,6 @@ const commands = [
     .setDescription("Post the high-tier testing rubric in the current channel. (Staff only)"),
 
   new SlashCommandBuilder()
-    .setName("verify")
-    .setDescription("Link your Discord account to your Minecraft username.")
-    .addStringOption((opt) =>
-      opt
-        .setName("username")
-        .setDescription("Your Minecraft username")
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName("platform")
-        .setDescription("Your account type")
-        .setRequired(true)
-        .addChoices(
-          { name: "Bedrock", value: "bedrock" },
-          { name: "Premium", value: "premium" },
-          { name: "Cracked", value: "cracked" }
-        )
-    ),
-
-  new SlashCommandBuilder()
     .setName("jointesting")
     .setDescription(
       "Join this queue as a tester alongside anyone already testing here. Run this in the queue channel."
@@ -47,12 +26,6 @@ const commands = [
     .setName("leavetesting")
     .setDescription(
       "Stop testing this queue. Run this in the queue channel."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("backfilllogs")
-    .setDescription(
-      "One-time: rebuild the website's test log from results channel history."
     ),
 
   new SlashCommandBuilder()

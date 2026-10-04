@@ -1609,26 +1609,29 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // /postverifyinfo — posts step-by-step "how to link your account" info to
-  // a fixed channel. Staff-only, meant to be run once (or again after an
-  // edit), not on every bot restart.
+  // the verify channel. Staff-only, meant to be run once (or again after an edit).
   if (interaction.isChatInputCommand() && interaction.commandName === "postverifyinfo") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
+    await interaction.deferReply({ ephemeral: true });
     try {
-      const byName = interaction.guild.channels.cache.find(
+      // Try to find the channel by name first; fall back to the known ID.
+      const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID || "1555518328028536832";
+      let channel = interaction.guild.channels.cache.find(
         (c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === "verify"
       );
-      const channel =
-        byName || (await interaction.guild.channels.fetch(process.env.VERIFY_CHANNEL_ID || "1555518328028536832"));
+      if (!channel) {
+        channel = await interaction.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
+      }
+      if (!channel) {
+        return interaction.editReply({ content: "Couldn't find the verify channel. Check the channel ID or name." });
+      }
       await channel.send({ embeds: [buildVerifyInfoEmbed()] });
-      return interaction.reply({ content: "Posted.", ephemeral: true });
+      return interaction.editReply({ content: "Posted." });
     } catch (err) {
-      console.error(err);
-      return interaction.reply({
-        content: "Couldn't post to that channel — make sure the bot can see it and has Send Messages permission there.",
-        ephemeral: true,
-      });
+      console.error("[postverifyinfo]", err);
+      return interaction.editReply({ content: `Failed to post: ${err.message}` });
     }
   }
 
