@@ -1,9 +1,6 @@
 console.log("[startup] index.js starting...");
 require("dotenv").config();
 
-// Keep-alive HTTP server so Render's free tier doesn't spin the process
-// down. UptimeRobot (or any monitor) should ping this every 5 minutes.
-require("http").createServer((req, res) => res.end("OK")).listen(process.env.PORT || 3000);
 const {
   Client,
   GatewayIntentBits,
