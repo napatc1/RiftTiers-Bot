@@ -2361,13 +2361,23 @@ client.on("interactionCreate", async (interaction) => {
       }
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
       if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
-      await interaction.reply({ content: "Closing the queue.", ephemeral: true });
-      suppressRealtimeFor(queueKey);
-      await setQueueClosed(queueKey, true);
-      await setQueueLocked(queueKey, false);
-      await clearQueueTesters(queueKey);
-      await clearQueueEntries(queueKey);
-      await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      // Remove this tester from the active list first.
+      await removeQueueTester(queueKey, interaction.user.id);
+      const remaining = await getQueueTesterIds(queueKey);
+      if (remaining.length > 0) {
+        // Other testers still active — just refresh the card without closing.
+        await interaction.reply({ content: "You've stopped testing. The queue stays open for the other testers.", ephemeral: true });
+        suppressRealtimeFor(queueKey);
+        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      } else {
+        // Last tester — fully close and wipe.
+        await interaction.reply({ content: "Closing the queue.", ephemeral: true });
+        suppressRealtimeFor(queueKey);
+        await setQueueClosed(queueKey, true);
+        await setQueueLocked(queueKey, false);
+        await clearQueueEntries(queueKey);
+        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      }
       return;
     }
 
@@ -2571,13 +2581,20 @@ client.on("interactionCreate", async (interaction) => {
       }
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
       if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
-      await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
-      suppressRealtimeFor(highKey);
-      await setQueueClosed(highKey, true);
-      await setQueueLocked(highKey, false);
-      await clearQueueTesters(highKey);
-      await clearQueueEntries(highKey);
-      await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+      await removeQueueTester(highKey, interaction.user.id);
+      const remaining = await getQueueTesterIds(highKey);
+      if (remaining.length > 0) {
+        await interaction.reply({ content: "You've stopped testing. The high queue stays open for the other testers.", ephemeral: true });
+        suppressRealtimeFor(highKey);
+        await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+      } else {
+        await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
+        suppressRealtimeFor(highKey);
+        await setQueueClosed(highKey, true);
+        await setQueueLocked(highKey, false);
+        await clearQueueEntries(highKey);
+        await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+      }
       return;
     }
 

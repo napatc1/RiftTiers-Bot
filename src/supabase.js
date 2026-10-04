@@ -301,8 +301,8 @@ async function formatQueue(queueKey) {
     .select("players!queue_entries_player_id_fkey(discord_id)")
     .eq("gamemode", queueKey)
     .order("joined_at", { ascending: true });
-  if (!data || data.length === 0) return "**Queues**\n_Queue is empty._";
-  return "**Queues**\n" + data.map((e, i) => `${i + 1}. <@${e.players.discord_id}>`).join("\n");
+  if (!data || data.length === 0) return "**Queue**\n_Queue is empty._";
+  return "**Queue**\n" + data.map((e, i) => `${i + 1}. <@${e.players.discord_id}>`).join("\n");
 }
 
 async function isQueueClosed(queueKey) {
