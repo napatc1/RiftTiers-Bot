@@ -1617,9 +1617,9 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
     try {
       // Try to find the channel by name first; fall back to the known ID.
-      const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID || "1555518328028536832";
+      const VERIFY_CHANNEL_ID = process.env.VERIFY_CHANNEL_ID || "1555538610776711201";
       let channel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === "verify"
+        (c) => c.type === ChannelType.GuildText && c.name === "✅verify"
       );
       if (!channel) {
         channel = await interaction.guild.channels.fetch(VERIFY_CHANNEL_ID).catch(() => null);
