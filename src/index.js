@@ -2954,7 +2954,6 @@ client.on("interactionCreate", async (interaction) => {
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
-  console.log(`[startup] DISCORD_GUILD_ID=${process.env.DISCORD_GUILD_ID || "(not set)"}`);
 
   // Load the persisted queue-message tracking before anything can post or
   // refresh a queue card — otherwise the first post after every restart
