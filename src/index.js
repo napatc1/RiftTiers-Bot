@@ -1783,6 +1783,57 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /removetester — managers/owners can kick any tester off the active list
+  if (interaction.isChatInputCommand() && interaction.commandName === "removetester") {
+    const roles = getRoles(interaction.member);
+    if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });
+    }
+    const parsed = parseChannelName(interaction.channel.name);
+    if (!parsed) {
+      return interaction.reply({ content: "Run this in a tiertest queue channel.", ephemeral: true });
+    }
+    const { gamemode, region } = parsed;
+    const queueKey = `${gamemode}:${region}`;
+    const target = interaction.options.getUser("tester");
+
+    const removed = await removeQueueTester(queueKey, target.id);
+    if (!removed) {
+      return interaction.reply({
+        content: `${target.username} isn't in the active testers list for **${gamemode}** (${region}).`,
+        ephemeral: true,
+      });
+    }
+
+    // Drop from in-memory active test if present.
+    const active = getActiveTesting(queueKey);
+    if (active) {
+      const idx = active.testerIds.indexOf(target.id);
+      if (idx !== -1) active.testerIds.splice(idx, 1);
+    }
+
+    // Refresh the queue card.
+    try {
+      const stored = getQueueMessage(queueKey);
+      if (stored) {
+        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
+        const queueMsg = await queueChannel.messages.fetch(stored.messageId);
+        await queueMsg.edit({
+          embeds: [await buildQueueEmbed(queueKey, gamemode)],
+          components: await buildQueueButtons(queueKey),
+        });
+      }
+    } catch (err) {
+      console.error("Couldn't refresh queue after removetester:", err.message);
+    }
+
+    return interaction.reply({
+      content: `Removed **${target.username}** from the active testers list for **${gamemode}** (${region}).`,
+      ephemeral: true,
+    });
+  }
+
+
   // /backfilllogs
   if (interaction.isChatInputCommand() && interaction.commandName === "backfilllogs") {
     if (!canManageCooldowns(interaction.member)) {

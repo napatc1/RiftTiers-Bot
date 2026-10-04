@@ -103,6 +103,12 @@ const commands = [
         .setRequired(false)
         .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
+  new SlashCommandBuilder()
+    .setName("removetester")
+    .setDescription("Remove a tester from the active testers list for this queue. (Managers only)")
+    .addUserOption((opt) =>
+      opt.setName("tester").setDescription("The tester to remove").setRequired(true)
+    ),
 ];
 
 module.exports = commands;
