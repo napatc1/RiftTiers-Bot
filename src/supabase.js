@@ -283,6 +283,18 @@ async function getQueueCount(queueKey) {
   return count || 0;
 }
 
+// Returns the 1-based position of a Discord user in the queue, or null if not in queue.
+async function getQueuePosition(queueKey, discordUserId) {
+  const { data } = await supabase
+    .from("queue_entries")
+    .select("players!queue_entries_player_id_fkey(discord_id), joined_at")
+    .eq("gamemode", queueKey)
+    .order("joined_at", { ascending: true });
+  if (!data) return null;
+  const idx = data.findIndex((e) => e.players?.discord_id === discordUserId);
+  return idx === -1 ? null : idx + 1;
+}
+
 async function formatQueue(queueKey) {
   const { data } = await supabase
     .from("queue_entries")
@@ -610,6 +622,7 @@ module.exports = {
   leaveQueue,
   popNext,
   getQueueCount,
+  getQueuePosition,
   formatQueue,
   isQueueClosed,
   setQueueClosed,

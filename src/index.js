@@ -70,6 +70,7 @@ const {
   leaveQueue,
   popNext,
   getQueueCount,
+  getQueuePosition,
   formatQueue,
   isQueueClosed,
   setQueueClosed,
@@ -822,6 +823,16 @@ async function resolveDisplayName(guild, discordUserId) {
   if (verified) return verified;
   const member = await guild.members.fetch(discordUserId).catch(() => null);
   return member ? member.user.username : discordUserId;
+}
+
+// Silently DMs a Discord user by ID. Swallows errors (e.g. DMs closed).
+async function dmUser(userId, content) {
+  try {
+    const user = await client.users.fetch(userId);
+    await user.send(content);
+  } catch {
+    // User has DMs closed — silently ignore.
+  }
 }
 
 // Creates a private channel visible only to the claiming tester(s) with the
@@ -2277,6 +2288,12 @@ client.on("interactionCreate", async (interaction) => {
       }
       const joined = await joinQueue(queueKey, interaction.user.id, region);
       await refreshQueueMessage(interaction, queueKey, gamemode);
+      if (joined) {
+        const pos = await getQueuePosition(queueKey, interaction.user.id);
+        if (pos === 1) {
+          dmUser(interaction.user.id, `🟡 You're **#1 in the ${gamemode} queue** — get ready! A tester will pull you shortly.`);
+        }
+      }
       return interaction.reply({
         content: joined ? "You joined the queue." : "You're already in the queue.",
         ephemeral: true,
@@ -2398,6 +2415,24 @@ client.on("interactionCreate", async (interaction) => {
           startedAt: Date.now(),
         });
 
+        // DM the testee that their test is starting
+        dmUser(nextUserId, `🟢 **Your ${gamemode} test is starting!** Head to your test channel: https://discord.com/channels/${interaction.guild.id}/${ticketChannel.id}`);
+
+        // DM the new #1 in queue (if someone is now first after the pull)
+        const queueData = await supabase
+          .from("queue_entries")
+          .select("players!queue_entries_player_id_fkey(discord_id)")
+          .eq("gamemode", queueKey)
+          .order("joined_at", { ascending: true })
+          .limit(1)
+          .then(({ data }) => data);
+        if (queueData && queueData.length > 0) {
+          const newFirstId = queueData[0]?.players?.discord_id;
+          if (newFirstId) {
+            dmUser(newFirstId, `🟡 You're now **#1 in the ${gamemode} queue** — get ready! A tester will pull you shortly.`);
+          }
+        }
+
         await refreshQueueMessage(interaction, queueKey, gamemode);
         return interaction.editReply({
           content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
@@ -2465,6 +2500,12 @@ client.on("interactionCreate", async (interaction) => {
 
       const joined = await joinQueue(highKey, interaction.user.id, region);
       await refreshHighQueueMessage(interaction, highKey, gamemode);
+      if (joined) {
+        const pos = await getQueuePosition(highKey, interaction.user.id);
+        if (pos === 1) {
+          dmUser(interaction.user.id, `🟡 You're **#1 in the ${gamemode} high queue** — get ready! A tester will pull you shortly.`);
+        }
+      }
       return interaction.reply({
         content: joined ? "You joined the high queue." : "You're already in the high queue.",
         ephemeral: true,
@@ -2579,6 +2620,24 @@ client.on("interactionCreate", async (interaction) => {
           gamemode: `${gamemode} (high)`,
           startedAt: Date.now(),
         });
+
+        // DM the testee that their test is starting
+        dmUser(nextUserId, `🟢 **Your ${gamemode} high-tier test is starting!** Head to your test channel: https://discord.com/channels/${interaction.guild.id}/${ticketChannel.id}`);
+
+        // DM the new #1 in high queue after the pull
+        const highQueueData = await supabase
+          .from("queue_entries")
+          .select("players!queue_entries_player_id_fkey(discord_id)")
+          .eq("gamemode", highKey)
+          .order("joined_at", { ascending: true })
+          .limit(1)
+          .then(({ data }) => data);
+        if (highQueueData && highQueueData.length > 0) {
+          const newFirstId = highQueueData[0]?.players?.discord_id;
+          if (newFirstId) {
+            dmUser(newFirstId, `🟡 You're now **#1 in the ${gamemode} high queue** — get ready! A tester will pull you shortly.`);
+          }
+        }
 
         await refreshHighQueueMessage(interaction, highKey, gamemode);
         return interaction.editReply({
