@@ -1785,7 +1785,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // /removetester — managers/owners can kick any tester off the active list
   if (interaction.isChatInputCommand() && interaction.commandName === "removetester") {
-    const roles = getRoles(interaction.member);
+    const roles = computeRoleFlags(interaction.member);
     if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
       return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });
     }
