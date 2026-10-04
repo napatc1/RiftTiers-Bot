@@ -461,10 +461,13 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
     );
 }
 
-function buildApplicationReviewButtons(applicationId) {
+const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
+
+function buildApplicationReviewButtons(type, applicationId) {
+  // type: "tester" | "staff"
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`tester_app_accept_${applicationId}`).setLabel("Accept").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`tester_app_deny_${applicationId}`).setLabel("Deny").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId(`app_accept_${type}_${applicationId}`).setLabel("Accept").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`app_deny_${type}_${applicationId}`).setLabel("Deny + Notes").setStyle(ButtonStyle.Danger)
   );
 }
 
@@ -2055,48 +2058,75 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.showModal(modal);
     }
 
-    if (interaction.customId.startsWith("tester_app_accept_") || interaction.customId.startsWith("tester_app_deny_")) {
+    // Accept button: app_accept_<type>_<id>
+    if (interaction.customId.startsWith("app_accept_")) {
       if (!canReviewApplications(interaction.member)) {
         return interaction.reply({ content: "Only managers/admins can review applications.", ephemeral: true });
       }
-      const accept = interaction.customId.startsWith("tester_app_accept_");
-      const applicationId = Number(interaction.customId.split("_").pop());
+      const parts = interaction.customId.split("_"); // ["app","accept","tester"|"staff", ...id]
+      const appType = parts[2];
+      const appId = parts.slice(3).join("_");
       await interaction.deferUpdate();
 
-      const decided = await decideTesterApplication(applicationId, accept ? "accepted" : "denied", interaction.user.id);
-      if (!decided) {
-        return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
-      }
-
-      const app = await getTesterApplication(applicationId);
-      const statusLine = `\n\n${accept ? "✅ **Accepted**" : "❌ **Denied**"} by <@${interaction.user.id}>`;
-      await interaction.message
-        .edit({ embeds: [buildApplicationReviewEmbed(app, statusLine)], components: [] })
-        .catch(() => {});
-
-      if (accept) {
+      if (appType === "tester") {
+        const applicationId = Number(appId);
+        const decided = await decideTesterApplication(applicationId, "accepted", interaction.user.id);
+        if (!decided) {
+          return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
+        }
+        const app = await getTesterApplication(applicationId);
+        const statusLine = `\n\n✅ **Accepted** by <@${interaction.user.id}>`;
+        await interaction.message.edit({ embeds: [buildApplicationReviewEmbed(app, statusLine)], components: [] }).catch(() => {});
         try {
           const member = await interaction.guild.members.fetch(app.discord_id);
           const testerRole = interaction.guild.roles.cache.get(PERMISSION_ROLE_IDS.tester);
           if (testerRole) await member.roles.add(testerRole).catch(() => {});
         } catch (err) {
-          console.error("Couldn't add Tester role after accepting application:", err.message);
+          console.error("Couldn't add Tester role:", err.message);
         }
-      }
-
-      try {
-        const applicant = await client.users.fetch(app.discord_id);
-        await applicant
-          .send(
-            accept
-              ? "🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role."
-              : "Your tester application for RyftTiers was **denied**. You're welcome to apply again in the future."
-          )
-          .catch(() => {});
-      } catch (err) {
-        console.error("Couldn't DM applicant:", err.message);
+        try {
+          const applicant = await client.users.fetch(app.discord_id);
+          await applicant.send("🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role.").catch(() => {});
+        } catch {}
+      } else {
+        // Staff application accept — update embed, DM applicant
+        const discordId = appId.split("_")[1]; // s_<discordId>_<timestamp>
+        const originalEmbed = interaction.message.embeds[0];
+        const updatedEmbed = EmbedBuilder.from(originalEmbed)
+          .setColor(0x4ade80)
+          .addFields({ name: "Decision", value: `✅ **Accepted** by <@${interaction.user.id}>` });
+        await interaction.message.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
+        try {
+          const applicant = await client.users.fetch(discordId);
+          await applicant.send("🎉 Your staff application for RyftTiers was **accepted**! Staff will be in touch with next steps.").catch(() => {});
+        } catch {}
       }
       return;
+    }
+
+    // Deny button: app_deny_<type>_<id> — show a modal for denial notes
+    if (interaction.customId.startsWith("app_deny_")) {
+      if (!canReviewApplications(interaction.member)) {
+        return interaction.reply({ content: "Only managers/admins can review applications.", ephemeral: true });
+      }
+      const parts = interaction.customId.split("_"); // ["app","deny","tester"|"staff", ...id]
+      const appType = parts[2];
+      const appId = parts.slice(3).join("_");
+      const modal = new ModalBuilder()
+        .setCustomId(`app_deny_modal_${appType}_${appId}`)
+        .setTitle("Deny Application")
+        .addComponents(
+          new ActionRowBuilder().addComponents(
+            new TextInputBuilder()
+              .setCustomId("notes")
+              .setLabel("Reason / notes (sent to applicant)")
+              .setStyle(TextInputStyle.Paragraph)
+              .setRequired(false)
+              .setPlaceholder("Leave blank to send a generic denial message.")
+              .setMaxLength(1000)
+          )
+        );
+      return interaction.showModal(modal);
     }
 
     // Ticket-only buttons (submit / close) work in ticket channels, which
@@ -2639,10 +2669,10 @@ client.on("interactionCreate", async (interaction) => {
     const availability = interaction.fields.getTextInputValue("availability").trim();
     await interaction.deferReply({ ephemeral: true });
     try {
-      const reviewChannel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
-      );
+      const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
+        // Use a stable pseudo-ID for staff apps: Discord snowflake (unique per user per submission)
+        const staffAppId = `s_${interaction.user.id}_${Date.now()}`;
         const embed = new EmbedBuilder()
           .setTitle("Staff Application")
           .setColor(0x2f7fd6)
@@ -2655,7 +2685,10 @@ client.on("interactionCreate", async (interaction) => {
             { name: "Availability", value: availability }
           )
           .setTimestamp();
-        await reviewChannel.send({ embeds: [embed] });
+        await reviewChannel.send({
+          embeds: [embed],
+          components: [buildApplicationReviewButtons("staff", staffAppId)],
+        });
       }
       return interaction.editReply({ content: "Application submitted! Staff will review it and reach out to you." });
     } catch (err) {
@@ -2672,14 +2705,12 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
     try {
       const applicationId = await createTesterApplication(interaction.user.id, { ign, region, experience, availability });
-      const reviewChannel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
-      );
+      const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
         const app = await getTesterApplication(applicationId);
         const reviewMsg = await reviewChannel.send({
           embeds: [buildApplicationReviewEmbed(app)],
-          components: [buildApplicationReviewButtons(applicationId)],
+          components: [buildApplicationReviewButtons("tester", applicationId)],
         });
         await setTesterApplicationReviewMessage(applicationId, reviewChannel.id, reviewMsg.id);
       }
@@ -2688,6 +2719,53 @@ client.on("interactionCreate", async (interaction) => {
       console.error("Couldn't submit tester application:", err.message);
       return interaction.editReply({ content: "Something went wrong submitting that. Try again or ping staff." });
     }
+  }
+
+  // Deny-with-notes modal submit: app_deny_modal_<type>_<id>
+  if (interaction.isModalSubmit() && interaction.customId.startsWith("app_deny_modal_")) {
+    const suffix = interaction.customId.replace("app_deny_modal_", ""); // "<type>_<id>"
+    const firstUnderscore = suffix.indexOf("_");
+    const appType = suffix.slice(0, firstUnderscore);
+    const appId = suffix.slice(firstUnderscore + 1);
+    const notes = (interaction.fields.getTextInputValue("notes") || "").trim();
+    await interaction.deferUpdate();
+
+    if (appType === "tester") {
+      const applicationId = Number(appId);
+      const decided = await decideTesterApplication(applicationId, "denied", interaction.user.id);
+      if (!decided) {
+        return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
+      }
+      const app = await getTesterApplication(applicationId);
+      const statusLine = `\n\n❌ **Denied** by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`;
+      await interaction.message.edit({ embeds: [buildApplicationReviewEmbed(app, statusLine)], components: [] }).catch(() => {});
+      try {
+        const applicant = await client.users.fetch(app.discord_id);
+        const dmText = notes
+          ? `Your tester application for RyftTiers was **denied**.\n\n**Reason:** ${notes}`
+          : "Your tester application for RyftTiers was **denied**. You're welcome to apply again in the future.";
+        await applicant.send(dmText).catch(() => {});
+      } catch {}
+    } else {
+      // Staff application deny
+      const discordId = appId.split("_")[1]; // s_<discordId>_<timestamp>
+      const originalEmbed = interaction.message.embeds[0];
+      const updatedEmbed = EmbedBuilder.from(originalEmbed)
+        .setColor(0xe05a5a)
+        .addFields({
+          name: "Decision",
+          value: `❌ **Denied** by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`,
+        });
+      await interaction.message.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
+      try {
+        const applicant = await client.users.fetch(discordId);
+        const dmText = notes
+          ? `Your staff application for RyftTiers was **denied**.\n\n**Reason:** ${notes}`
+          : "Your staff application for RyftTiers was **denied**. You're welcome to apply again in the future.";
+        await applicant.send(dmText).catch(() => {});
+      } catch {}
+    }
+    return;
   }
 
   if (interaction.isModalSubmit() && interaction.customId.startsWith("submit_result_")) {
