@@ -102,6 +102,7 @@ const {
   handleTicketChannelMessage,
   handleTicketChannelMessageEdit,
   handleTicketChannelMessageDelete,
+  handleTestChannelMessage,
 } = require("./realtime-sync");
 
 const client = new Client({
@@ -3080,21 +3081,9 @@ client.on("guildMemberUpdate", (_oldMember, newMember) => {
 // channel, so this is cheap to call for every message).
 client.on("messageCreate", async (message) => {
   handleTicketChannelMessage(message);
-
-  // Test ticket relay: when a tester types in a live test channel, delete
-  // their message and repost it as "Tester: <message>" so it's clearly
-  // attributed. Testees' messages are left as-is.
-  if (!message.author.bot && message.content) {
-    const testInfo = getActiveTestingByTicket(message.channelId);
-    if (testInfo && testInfo.testerIds.includes(message.author.id)) {
-      try {
-        await message.delete().catch(() => {});
-        await message.channel.send(`**Tester:** ${message.content}`);
-      } catch (err) {
-        console.error("[tester-relay] failed:", err.message);
-      }
-    }
-  }
+  // Mirror test channel messages (from any non-bot sender) to test_messages
+  // so the website chat panel can display them in real time.
+  handleTestChannelMessage(message);
 
   // Sticky "Testing Punishments" message in #punishments channel.
   // Whenever anyone (including the bot's own sticky repost) sends a message,

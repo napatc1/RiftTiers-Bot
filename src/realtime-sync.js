@@ -17,6 +17,10 @@ const VERIFIED_ROLE_ID = "1556203882529558539";
 // subscription below.
 const ticketChannelMap = new Map();
 
+// channelId -> liveTestId, same idea for test ticket channels.
+// Populated from live_tests on boot and kept current as channels are created.
+const testChannelMap = new Map();
+
 function sanitizeChannelName(name) {
   return (
     (name || "player")
@@ -288,6 +292,31 @@ async function handleTicketChannelMessageDelete(message) {
   }
 }
 
+// Called from index.js messageCreate. If the message is in a test ticket
+// channel, mirror it to test_messages so the website chat panel sees it.
+async function handleTestChannelMessage(message) {
+  if (message.author.bot) return;
+  const liveTestId = testChannelMap.get(message.channelId);
+  if (!liveTestId) return;
+
+  try {
+    const player = await ensurePlayerForDiscordUser(
+      message.author.id,
+      message.member?.displayName || message.author.username
+    );
+    await supabase.from("test_messages").insert({
+      live_test_id: liveTestId,
+      author_player_id: player?.id || null,
+      author_label: message.member?.displayName || message.author.username,
+      source: "discord",
+      content: message.content || "*(no text content)*",
+      discord_message_id: message.id,
+    });
+  } catch (err) {
+    console.error("[realtime-sync] handleTestChannelMessage failed:", err.message);
+  }
+}
+
 // ---------- test tickets from website ----------
 
 // When a tester clicks "Next / Pull" on the website, claim_next() inserts a
@@ -407,6 +436,9 @@ async function createTestTicketFromWebsite(guild, liveTest, { onActiveTestSet } 
       })
       .eq("id", liveTest.id);
 
+    // Register so Discord messages in this channel get mirrored to test_messages.
+    testChannelMap.set(channel.id, liveTest.id);
+
     // Register in the in-memory map so Submit/Cancel buttons work.
     if (onActiveTestSet) {
       const queueKey = `${liveTest.gamemode}:${liveTest.region || "NA"}`;
@@ -454,6 +486,13 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
     .not("discord_channel_id", "is", null);
   (openTickets || []).forEach((t) => ticketChannelMap.set(t.discord_channel_id, t.id));
 
+  // Prime the test channel map from live_tests that already have a channel.
+  const { data: liveTests } = await supabase
+    .from("live_tests")
+    .select("id, discord_ticket_channel_id")
+    .not("discord_ticket_channel_id", "is", null);
+  (liveTests || []).forEach((t) => testChannelMap.set(t.discord_ticket_channel_id, t.id));
+
   supabase
     .channel("bot-player-tiers")
     .on("postgres_changes", { event: "*", schema: "public", table: "player_tiers" }, (payload) => {
@@ -496,6 +535,30 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
     })
     .subscribe();
 
+  // Website → Discord: when a test_message with source='website' is inserted,
+  // post it into the Discord test ticket channel.
+  supabase
+    .channel("bot-test-messages")
+    .on("postgres_changes", { event: "INSERT", schema: "public", table: "test_messages" }, async (payload) => {
+      const row = payload.new;
+      if (!row || row.source !== "website") return;
+      try {
+        const { data: lt } = await supabase
+          .from("live_tests")
+          .select("discord_ticket_channel_id")
+          .eq("id", row.live_test_id)
+          .maybeSingle();
+        if (!lt?.discord_ticket_channel_id) return;
+        const ch = guild.channels.cache.get(lt.discord_ticket_channel_id)
+          || await guild.channels.fetch(lt.discord_ticket_channel_id).catch(() => null);
+        if (!ch) return;
+        await ch.send(`**${row.author_label || "Player"}:** ${row.content}`);
+      } catch (err) {
+        console.error("[realtime-sync] test_messages → Discord failed:", err.message);
+      }
+    })
+    .subscribe();
+
   // Watch queue_closed so that opening/closing from the website (which calls
   // the set_queue_closed RPC directly) is reflected in Discord immediately.
   //
@@ -524,12 +587,20 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
       .subscribe();
   }
 
-  // Watch live_tests inserts from the website (discord_ticket_channel_id is
-  // null when claim_next() fires from the website — the bot fills it in).
+  // Watch live_tests inserts.
+  // - No discord_ticket_channel_id → claimed from website, create the channel.
+  // - Already has a channel id → claimed from Discord, just register it in the map.
   supabase
     .channel("bot-live-tests")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "live_tests" }, (payload) => {
-      createTestTicketFromWebsite(guild, payload.new, { onActiveTestSet });
+      const row = payload.new;
+      if (!row) return;
+      if (row.discord_ticket_channel_id) {
+        // Discord-side claim: register so messages get mirrored.
+        testChannelMap.set(row.discord_ticket_channel_id, row.id);
+      } else {
+        createTestTicketFromWebsite(guild, row, { onActiveTestSet });
+      }
     })
     .subscribe();
 
@@ -554,5 +625,6 @@ module.exports = {
   handleTicketChannelMessage,
   handleTicketChannelMessageEdit,
   handleTicketChannelMessageDelete,
+  handleTestChannelMessage,
   assignTierRole,
 };
