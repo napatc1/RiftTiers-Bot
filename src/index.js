@@ -2954,6 +2954,7 @@ client.on("interactionCreate", async (interaction) => {
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  console.log(`[startup] DISCORD_GUILD_ID=${process.env.DISCORD_GUILD_ID || "(not set)"}`);
 
   // Load the persisted queue-message tracking before anything can post or
   // refresh a queue card — otherwise the first post after every restart
@@ -3074,6 +3075,21 @@ client.on("guildMemberUpdate", (_oldMember, newMember) => {
 // channel, so this is cheap to call for every message).
 client.on("messageCreate", async (message) => {
   handleTicketChannelMessage(message);
+
+  // Test ticket relay: when a tester types in a live test channel, delete
+  // their message and repost it as "Tester: <message>" so it's clearly
+  // attributed. Testees' messages are left as-is.
+  if (!message.author.bot && message.content) {
+    const testInfo = getActiveTestingByTicket(message.channelId);
+    if (testInfo && testInfo.testerIds.includes(message.author.id)) {
+      try {
+        await message.delete().catch(() => {});
+        await message.channel.send(`**Tester:** ${message.content}`);
+      } catch (err) {
+        console.error("[tester-relay] failed:", err.message);
+      }
+    }
+  }
 
   // Sticky "Testing Punishments" message in #punishments channel.
   // Whenever anyone (including the bot's own sticky repost) sends a message,
