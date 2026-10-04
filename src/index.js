@@ -2092,8 +2092,16 @@ client.on("interactionCreate", async (interaction) => {
           await applicant.send("🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role.").catch(() => {});
         } catch {}
       } else {
-        // Staff application accept — update embed, DM applicant
+        // Staff application accept — give Moderator role, update embed, DM applicant
         const discordId = appId.split("_")[1]; // s_<discordId>_<timestamp>
+        const MODERATOR_ROLE_ID = "1555516390822252654";
+        try {
+          const member = await interaction.guild.members.fetch(discordId);
+          const modRole = interaction.guild.roles.cache.get(MODERATOR_ROLE_ID);
+          if (modRole) await member.roles.add(modRole).catch(() => {});
+        } catch (err) {
+          console.error("Couldn't add Moderator role after accepting staff application:", err.message);
+        }
         const originalEmbed = interaction.message.embeds[0];
         const updatedEmbed = EmbedBuilder.from(originalEmbed)
           .setColor(0x4ade80)
@@ -2101,7 +2109,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.message.edit({ embeds: [updatedEmbed], components: [] }).catch(() => {});
         try {
           const applicant = await client.users.fetch(discordId);
-          await applicant.send("🎉 Your staff application for RyftTiers was **accepted**! Staff will be in touch with next steps.").catch(() => {});
+          await applicant.send("🎉 Your staff application for RyftTiers was **accepted**! You've been given the Moderator role.").catch(() => {});
         } catch {}
       }
       return;
