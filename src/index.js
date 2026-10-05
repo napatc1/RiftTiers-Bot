@@ -471,6 +471,7 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 }
 
 const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1556650541696946338";
 
 function buildApplicationReviewButtons(type, applicationId) {
   // type: "tester" | "staff" | "media"
@@ -2982,7 +2983,7 @@ client.on("interactionCreate", async (interaction) => {
         sampleVideos: "",              // modal has 5-field limit; sample videos in website form only
         whyMedia,
       });
-      const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+      const reviewChannel = await interaction.guild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
         const app = await getMediaApplication(applicationId);
         const reviewMsg = await reviewChannel.send({
@@ -3267,6 +3268,32 @@ client.once("ready", async () => {
     });
   } catch (err) {
     console.error("[realtime-sync] failed to start:", err.message);
+  }
+
+  // Watch for new media applications submitted from the website and post
+  // the review embed to the media review channel.
+  try {
+    const { supabase: sb } = require("./supabase");
+    sb.channel("bot-media-applications")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "media_applications" }, async (payload) => {
+        const app = payload.new;
+        if (!app) return;
+        try {
+          const reviewChannel = await guild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
+          if (!reviewChannel) return;
+          const reviewMsg = await reviewChannel.send({
+            embeds: [buildMediaReviewEmbed(app)],
+            components: [buildApplicationReviewButtons("media", app.id)],
+          });
+          await setMediaApplicationReviewMessage(app.id, reviewChannel.id, reviewMsg.id);
+        } catch (err) {
+          console.error("[media-app] failed to post review embed:", err.message);
+        }
+      })
+      .subscribe();
+    console.log("[startup] subscribed to media_applications");
+  } catch (err) {
+    console.error("[startup] failed to subscribe to media_applications:", err.message);
   }
 
   // Lock down every known tiertest channel to testers-and-up on boot, so
