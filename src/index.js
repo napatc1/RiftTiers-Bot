@@ -2297,47 +2297,43 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.customId === "queue_join") {
+      await interaction.deferReply({ ephemeral: true });
       if (isRestricted(interaction.member)) {
-        return interaction.reply({ content: "You are restricted from joining queues.", ephemeral: true });
+        return interaction.editReply({ content: "You are restricted from joining queues." });
       }
       const verifiedUsername = await getVerifiedUsername(interaction.user.id);
       if (!verifiedUsername) {
-        return interaction.reply({
-          content:
-            "You need to verify before joining a queue — link your account at https://napatc1.github.io/RiftTiers-Website/Verify first.",
-          ephemeral: true,
+        return interaction.editReply({
+          content: "You need to verify before joining a queue — link your account at https://ryfttiers.pages.dev/Verify first.",
         });
       }
       const joiner = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
       if (!joiner?.region) {
-        return interaction.reply({
-          content: "Set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify> before joining a queue.",
-          ephemeral: true,
+        return interaction.editReply({
+          content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
       if (joiner.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === joiner.region
         );
-        return interaction.reply({
+        return interaction.editReply({
           content: `This is the **${region}** queue — you're set to **${joiner.region}**. ${
             correctChannel ? `Head to ${correctChannel} instead.` : "Ask staff to run /setupqueues if your region's channel is missing."
           }`,
-          ephemeral: true,
         });
       }
       const testerJoining = isTester(interaction.member);
       if (!testerJoining && await isQueueClosed(queueKey)) {
-        return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
+        return interaction.editReply({ content: "This queue is closed right now." });
       }
       if (!testerJoining && await getQueueLocked(queueKey)) {
-        return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
+        return interaction.editReply({ content: "This queue is locked to new joins right now." });
       }
       const cooldownUntil = await getCooldownUntil(gamemode, interaction.user.id);
       if (cooldownUntil && cooldownUntil > Date.now()) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `You were tested in **${gamemode}** recently. You can queue again in ${formatRemaining(cooldownUntil - Date.now())}.`,
-          ephemeral: true,
         });
       }
       const joined = await joinQueue(queueKey, interaction.user.id, region);
@@ -2348,18 +2344,17 @@ client.on("interactionCreate", async (interaction) => {
           dmUser(interaction.user.id, `🟡 You're **#1 in the ${gamemode} queue** — get ready! A tester will pull you shortly.`);
         }
       }
-      return interaction.reply({
+      return interaction.editReply({
         content: joined ? "You joined the queue." : "You're already in the queue.",
-        ephemeral: true,
       });
     }
 
     if (interaction.customId === "queue_leave") {
+      await interaction.deferReply({ ephemeral: true });
       const left = await leaveQueue(queueKey, interaction.user.id);
       await refreshQueueMessage(interaction, queueKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: left ? "You left the queue." : "You weren't in the queue.",
-        ephemeral: true,
       });
     }
 
@@ -2516,42 +2511,40 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- high queue ----------
     if (interaction.customId === "highqueue_join") {
+      await interaction.deferReply({ ephemeral: true });
       const testerJoiningHigh = isTester(interaction.member);
 
       if (!testerJoiningHigh && isRestricted(interaction.member)) {
-        return interaction.reply({ content: "You are restricted from joining queues.", ephemeral: true });
+        return interaction.editReply({ content: "You are restricted from joining queues." });
       }
       if (!testerJoiningHigh && await isQueueClosed(highKey)) {
-        return interaction.reply({ content: "This queue is closed right now.", ephemeral: true });
+        return interaction.editReply({ content: "This queue is closed right now." });
       }
       if (!testerJoiningHigh && await getQueueLocked(highKey)) {
-        return interaction.reply({ content: "This queue is locked to new joins right now.", ephemeral: true });
+        return interaction.editReply({ content: "This queue is locked to new joins right now." });
       }
 
       const username = await getVerifiedUsername(interaction.user.id);
       if (!username) {
-        return interaction.reply({
-          content: `You need to link your Minecraft account first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify>, then try joining again.`,
-          ephemeral: true,
+        return interaction.editReply({
+          content: `You need to link your Minecraft account first — head to the website: <https://ryfttiers.pages.dev/Verify>, then try joining again.`,
         });
       }
 
       const player = await getPlayer(username);
       if (!player?.region) {
-        return interaction.reply({
-          content: "Set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify> before joining a queue.",
-          ephemeral: true,
+        return interaction.editReply({
+          content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
       if (player.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === player.region
         );
-        return interaction.reply({
+        return interaction.editReply({
           content: `This is the **${region}** high queue — you're set to **${player.region}**. ${
             correctChannel ? `Head to ${correctChannel} instead.` : "Ask staff to run /setupqueues if your region's channel is missing."
           }`,
-          ephemeral: true,
         });
       }
 
@@ -2559,9 +2552,8 @@ client.on("interactionCreate", async (interaction) => {
       const tierIndex = currentTier ? TIER_OPTIONS.indexOf(currentTier) : -1;
 
       if (tierIndex === -1 || tierIndex > HIGH_QUEUE_MAX_INDEX) {
-        return interaction.reply({
+        return interaction.editReply({
           content: `The high queue for **${gamemode}** is only open to players already tiered **LT3 or better**. Your current tier: **${currentTier || "Untested"}**.`,
-          ephemeral: true,
         });
       }
 
@@ -2573,18 +2565,17 @@ client.on("interactionCreate", async (interaction) => {
           dmUser(interaction.user.id, `🟡 You're **#1 in the ${gamemode} high queue** — get ready! A tester will pull you shortly.`);
         }
       }
-      return interaction.reply({
+      return interaction.editReply({
         content: joined ? "You joined the high queue." : "You're already in the high queue.",
-        ephemeral: true,
       });
     }
 
     if (interaction.customId === "highqueue_leave") {
+      await interaction.deferReply({ ephemeral: true });
       const left = await leaveQueue(highKey, interaction.user.id);
       await refreshHighQueueMessage(interaction, highKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: left ? "You left the high queue." : "You weren't in the high queue.",
-        ephemeral: true,
       });
     }
 
