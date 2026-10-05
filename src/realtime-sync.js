@@ -587,9 +587,10 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
       .subscribe();
   }
 
-  // Watch live_tests inserts.
-  // - No discord_ticket_channel_id → claimed from website, create the channel.
-  // - Already has a channel id → claimed from Discord, just register it in the map.
+  // Watch live_tests inserts and deletes.
+  // INSERT - No discord_ticket_channel_id → claimed from website, create the channel.
+  //        - Already has a channel id → claimed from Discord, just register it in the map.
+  // DELETE - cancelled from website; close and delete the Discord ticket channel.
   supabase
     .channel("bot-live-tests")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "live_tests" }, (payload) => {
@@ -600,6 +601,25 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
         testChannelMap.set(row.discord_ticket_channel_id, row.id);
       } else {
         createTestTicketFromWebsite(guild, row, { onActiveTestSet });
+      }
+    })
+    .on("postgres_changes", { event: "DELETE", schema: "public", table: "live_tests" }, async (payload) => {
+      const row = payload.old;
+      if (!row) return;
+      // Clean up in-memory map.
+      const channelId = row.discord_ticket_channel_id;
+      if (channelId) testChannelMap.delete(channelId);
+      // Close the Discord ticket channel.
+      try {
+        const ch = channelId
+          ? await guild.channels.fetch(channelId).catch(() => null)
+          : null;
+        if (ch) {
+          await ch.send("❌ This test was cancelled from the website — channel closing.").catch(() => {});
+          setTimeout(() => ch.delete().catch((err) => console.error("[realtime-sync] failed to delete cancelled test channel:", err.message)), 3000);
+        }
+      } catch (err) {
+        console.error("[realtime-sync] error closing cancelled test channel:", err.message);
       }
     })
     .subscribe();
