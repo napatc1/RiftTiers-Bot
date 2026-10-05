@@ -13,6 +13,10 @@ const commands = [
     .setDescription("Post the staff application embed to the staff-app channel. (Staff only)"),
 
   new SlashCommandBuilder()
+    .setName("postmediaapp")
+    .setDescription("Post the media role application embed in the current channel. (Staff only)"),
+
+  new SlashCommandBuilder()
     .setName("posthighrubric")
     .setDescription("Post the high-tier testing rubric in the current channel. (Staff only)"),
 

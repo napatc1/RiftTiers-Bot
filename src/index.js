@@ -96,6 +96,10 @@ const {
   getTesterApplication,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
+  createMediaApplication,
+  getMediaApplication,
+  setMediaApplicationReviewMessage,
+  decideMediaApplication,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -469,11 +473,65 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
 
 function buildApplicationReviewButtons(type, applicationId) {
-  // type: "tester" | "staff"
+  // type: "tester" | "staff" | "media"
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`app_accept_${type}_${applicationId}`).setLabel("Accept").setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId(`app_deny_${type}_${applicationId}`).setLabel("Deny + Notes").setStyle(ButtonStyle.Danger)
   );
+}
+
+function buildMediaApplicationModal() {
+  return new ModalBuilder()
+    .setCustomId("media_apply_modal")
+    .setTitle("Media Role Application")
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("channel_link")
+          .setLabel("Channel / Profile Link + Platform")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("e.g. YouTube: https://youtube.com/@yourchannel")
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("follower_count")
+          .setLabel("Follower / Subscriber Count")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("e.g. ~2,500")
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("why_media")
+          .setLabel("Why do you want the Media role?")
+          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(1000)
+          .setRequired(true)
+      )
+    );
+}
+
+function buildMediaReviewEmbed(app, statusLine = "") {
+  return new EmbedBuilder()
+    .setTitle("🎬 Media Role Application")
+    .setColor(statusLine ? (statusLine.includes("Accepted") ? 0x4ade80 : 0xe05a5a) : 0xf59e0b)
+    .setDescription(
+      `**Applicant:** <@${app.discord_id}>\n` +
+      `**IGN:** ${app.ign}\n` +
+      `**Region:** ${app.region}\n\n` +
+      `**Channel / Platform**\n${app.channel_link}\n\n` +
+      `**Followers:** ${app.follower_count}\n\n` +
+      `**Sample Videos**\n${app.sample_videos || "—"}\n\n` +
+      `**Why Media Role?**\n${app.why_media}` +
+      statusLine
+    );
 }
 
 // Managers/admins only — granting the Tester role is a bigger call than
@@ -1101,6 +1159,36 @@ client.on("interactionCreate", async (interaction) => {
     });
 
     return interaction.editReply({ content: "Staff application posted!" });
+  }
+
+  // /postmediaapp — posts the media role application form embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "postmediaapp") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const mediaAppEmbed = new EmbedBuilder()
+      .setTitle("🎬 Apply for the Media Role")
+      .setColor(0xf59e0b)
+      .setDescription(
+        "Are you a content creator who makes Minecraft PvP videos? Apply for the **Media role** and get Discord recognition, early access to updates, and a direct line to staff.\n\n" +
+        "You'll be asked for your IGN, region, channel link, follower count, some sample videos, and why you want the role. Staff reviews every application — you'll be DM'd either way.\n\n" +
+        "**You can also apply from the website — go to the Media tab at ryfttiers.pages.dev**\n\n" +
+        "**Please provide accurate information.** Fake stats will result in a denial."
+      );
+
+    const applyButton = new ButtonBuilder()
+      .setCustomId("media_apply")
+      .setLabel("Apply")
+      .setStyle(ButtonStyle.Primary);
+
+    await interaction.channel.send({
+      embeds: [mediaAppEmbed],
+      components: [new ActionRowBuilder().addComponents(applyButton)],
+    });
+
+    return interaction.editReply({ content: "Media application embed posted!" });
   }
 
   // /posthighrubric — posts the high-tier testing rubric to the current channel
@@ -2091,6 +2179,11 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.showModal(buildTesterApplicationModal());
     }
 
+    // ---------- #media-application ----------
+    if (interaction.customId === "media_apply") {
+      return interaction.showModal(buildMediaApplicationModal());
+    }
+
     if (interaction.customId === "staff_apply") {
       const modal = new ModalBuilder()
         .setCustomId("staff_apply_modal")
@@ -2156,6 +2249,19 @@ client.on("interactionCreate", async (interaction) => {
         try {
           const applicant = await client.users.fetch(app.discord_id);
           await applicant.send("🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role.").catch(() => {});
+        } catch {}
+      } else if (appType === "media") {
+        const applicationId = Number(appId);
+        const decided = await decideMediaApplication(applicationId, "accepted", interaction.user.id);
+        if (!decided) {
+          return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
+        }
+        const app = await getMediaApplication(applicationId);
+        const statusLine = `\n\n✅ **Accepted** by <@${interaction.user.id}>`;
+        await interaction.message.edit({ embeds: [buildMediaReviewEmbed(app, statusLine)], components: [] }).catch(() => {});
+        try {
+          const applicant = await client.users.fetch(app.discord_id);
+          await applicant.send("🎉 Your media role application for RyftTiers was **accepted**! Welcome to the Media team — a staff member will be in touch soon.").catch(() => {});
         } catch {}
       } else {
         // Staff application accept — give Moderator role, update embed, DM applicant
@@ -2860,6 +2966,38 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
+  // Media application modal submit
+  if (interaction.isModalSubmit() && interaction.customId === "media_apply_modal") {
+    const ign         = interaction.fields.getTextInputValue("ign").trim();
+    const region      = interaction.fields.getTextInputValue("region").trim().toUpperCase();
+    const channelLink = interaction.fields.getTextInputValue("channel_link").trim();
+    const followerCount = interaction.fields.getTextInputValue("follower_count").trim();
+    const whyMedia    = interaction.fields.getTextInputValue("why_media").trim();
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const applicationId = await createMediaApplication(interaction.user.id, {
+        ign, region,
+        contentType: "Discord Modal",  // platform info is embedded in channelLink
+        channelLink, followerCount,
+        sampleVideos: "",              // modal has 5-field limit; sample videos in website form only
+        whyMedia,
+      });
+      const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+      if (reviewChannel) {
+        const app = await getMediaApplication(applicationId);
+        const reviewMsg = await reviewChannel.send({
+          embeds: [buildMediaReviewEmbed(app)],
+          components: [buildApplicationReviewButtons("media", applicationId)],
+        });
+        await setMediaApplicationReviewMessage(applicationId, reviewChannel.id, reviewMsg.id);
+      }
+      return interaction.editReply({ content: "Media application submitted! Staff will review it and DM you either way." });
+    } catch (err) {
+      console.error("Couldn't submit media application:", err.message);
+      return interaction.editReply({ content: "Something went wrong. Try again or ping staff." });
+    }
+  }
+
   // Deny-with-notes modal submit: app_deny_modal_<type>_<id>
   if (interaction.isModalSubmit() && interaction.customId.startsWith("app_deny_modal_")) {
     const suffix = interaction.customId.replace("app_deny_modal_", ""); // "<type>_<id>"
@@ -2883,6 +3021,22 @@ client.on("interactionCreate", async (interaction) => {
         const dmText = notes
           ? `Your tester application for RyftTiers was **denied**.\n\n**Reason:** ${notes}`
           : "Your tester application for RyftTiers was **denied**. You're welcome to apply again in the future.";
+        await applicant.send(dmText).catch(() => {});
+      } catch {}
+    } else if (appType === "media") {
+      const applicationId = Number(appId);
+      const decided = await decideMediaApplication(applicationId, "denied", interaction.user.id);
+      if (!decided) {
+        return interaction.followUp({ content: "That application was already decided.", ephemeral: true });
+      }
+      const app = await getMediaApplication(applicationId);
+      const statusLine = `\n\n❌ **Denied** by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`;
+      await interaction.message.edit({ embeds: [buildMediaReviewEmbed(app, statusLine)], components: [] }).catch(() => {});
+      try {
+        const applicant = await client.users.fetch(app.discord_id);
+        const dmText = notes
+          ? `Your media role application for RyftTiers was **denied**.\n\n**Reason:** ${notes}`
+          : "Your media role application for RyftTiers was **denied**. You're welcome to apply again in the future.";
         await applicant.send(dmText).catch(() => {});
       } catch {}
     } else {

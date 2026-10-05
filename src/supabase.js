@@ -612,6 +612,55 @@ async function decideTesterApplication(applicationId, status, reviewerDiscordId)
   return !!data;
 }
 
+// ---------- media applications ----------
+
+async function createMediaApplication(discordUserId, { ign, region, contentType, channelLink, followerCount, sampleVideos, whyMedia }) {
+  const { data, error } = await supabase
+    .from("media_applications")
+    .insert({
+      discord_id: discordUserId,
+      ign,
+      region,
+      content_type: contentType,
+      channel_link: channelLink,
+      follower_count: followerCount,
+      sample_videos: sampleVideos,
+      why_media: whyMedia,
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
+async function getMediaApplication(applicationId) {
+  const { data } = await supabase
+    .from("media_applications")
+    .select("*")
+    .eq("id", applicationId)
+    .maybeSingle();
+  return data;
+}
+
+async function setMediaApplicationReviewMessage(applicationId, channelId, messageId) {
+  await supabase
+    .from("media_applications")
+    .update({ review_channel_id: channelId, review_message_id: messageId })
+    .eq("id", applicationId);
+}
+
+async function decideMediaApplication(applicationId, status, reviewerDiscordId) {
+  const { data, error } = await supabase
+    .from("media_applications")
+    .update({ status, reviewed_by_discord_id: reviewerDiscordId, reviewed_at: new Date().toISOString() })
+    .eq("id", applicationId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -660,4 +709,8 @@ module.exports = {
   getTesterApplication,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
+  createMediaApplication,
+  getMediaApplication,
+  setMediaApplicationReviewMessage,
+  decideMediaApplication,
 };
