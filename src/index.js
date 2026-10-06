@@ -525,7 +525,6 @@ function buildMediaReviewEmbed(app, statusLine = "") {
       `**Region:** ${app.region}\n\n` +
       `**Channel / Platform**\n${app.channel_link}\n\n` +
       `**Followers:** ${app.follower_count}\n\n` +
-      `**Sample Videos**\n${app.sample_videos || "—"}\n\n` +
       `**Why Media Role?**\n${app.why_media}` +
       statusLine
     );
