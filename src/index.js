@@ -3275,6 +3275,14 @@ client.once("ready", async () => {
     console.error("[realtime-sync] failed to start:", err.message);
   }
 
+  // Fetch guild once for all application Realtime listeners below.
+  let appGuild = null;
+  try {
+    appGuild = await client.guilds.fetch(guildId);
+  } catch (err) {
+    console.error("[startup] failed to fetch guild for app listeners:", err.message);
+  }
+
   // Watch for new media applications submitted from the website and post
   // the review embed to the media review channel.
   try {
@@ -3284,7 +3292,7 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app) return;
         try {
-          const reviewChannel = await guild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
+          const reviewChannel = await appGuild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
           if (!reviewChannel) return;
           const reviewMsg = await reviewChannel.send({
             embeds: [buildMediaReviewEmbed(app)],
@@ -3309,7 +3317,7 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app || app.review_message_id) return; // skip if already handled by bot modal flow
         try {
-          const reviewChannel = await guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+          const reviewChannel = await appGuild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
           if (!reviewChannel) return;
           const reviewMsg = await reviewChannel.send({
             embeds: [buildApplicationReviewEmbed(app)],
@@ -3334,7 +3342,7 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app) return;
         try {
-          const reviewChannel = await guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+          const reviewChannel = await appGuild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
           if (!reviewChannel) return;
           const staffAppId = `s_${app.discord_id}_${app.id}`;
           const embed = new EmbedBuilder()
