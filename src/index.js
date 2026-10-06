@@ -1098,8 +1098,8 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
 client.on("interactionCreate", async (interaction) => {
  try {
 
-  // /sendrules — posts the server rules embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "sendrules") {
+  // /util sendrules — posts the server rules embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "sendrules") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1122,8 +1122,8 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Rules posted!" });
   }
 
-  // /poststaffapp — posts a staff application form embed with an Apply button
-  if (interaction.isChatInputCommand() && interaction.commandName === "poststaffapp") {
+  // /util poststaffapp — posts a staff application form embed with an Apply button
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "poststaffapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1157,8 +1157,8 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Staff application posted!" });
   }
 
-  // /postmediaapp — posts the media role application form embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "postmediaapp") {
+  // /util postmediaapp — posts the media role application form embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "postmediaapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1187,8 +1187,8 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Media application embed posted!" });
   }
 
-  // /posthighrubric — posts the high-tier testing rubric to the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "posthighrubric") {
+  // /util posthighrubric — posts the high-tier testing rubric to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "posthighrubric") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1236,7 +1236,7 @@ client.on("interactionCreate", async (interaction) => {
   // and posts a fresh queue message in every channel that doesn't already
   // have one tracked. Safe to re-run after adding a new gamemode to
   // GAMEMODE_CHANNELS — it only touches what's missing.
-  if (interaction.isChatInputCommand() && interaction.commandName === "setupqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "setupqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1575,7 +1575,7 @@ client.on("interactionCreate", async (interaction) => {
   // any extras), renames it to its proper emoji name, purges every message
   // in it, and re-posts exactly one fresh queue card (plus one high-queue
   // card), both closed.
-  if (interaction.isChatInputCommand() && interaction.commandName === "resetqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "resetqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1709,7 +1709,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // /postverifyinfo — posts step-by-step "how to link your account" info to
   // the verify channel. Staff-only, meant to be run once (or again after an edit).
-  if (interaction.isChatInputCommand() && interaction.commandName === "postverifyinfo") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "postverifyinfo") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1867,8 +1867,8 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // /removetester — managers/owners can kick any tester off the active list
-  if (interaction.isChatInputCommand() && interaction.commandName === "removetester") {
+  // /util removetester — managers/owners can kick any tester off the active list
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "removetester") {
     const roles = computeRoleFlags(interaction.member);
     if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
       return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });

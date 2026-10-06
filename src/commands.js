@@ -5,20 +5,37 @@ const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
 const commands = [
   new SlashCommandBuilder()
-    .setName("sendrules")
-    .setDescription("Post the server rules embed in the current channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("poststaffapp")
-    .setDescription("Post the staff application embed to the staff-app channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("postmediaapp")
-    .setDescription("Post the media role application embed in the current channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("posthighrubric")
-    .setDescription("Post the high-tier testing rubric in the current channel. (Staff only)"),
+    .setName("util")
+    .setDescription("Staff utility commands.")
+    .addSubcommand((sub) =>
+      sub.setName("sendrules").setDescription("Post the server rules embed in the current channel.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("postverifyinfo").setDescription("Post step-by-step account-linking instructions to the verify-info channel.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("poststaffapp").setDescription("Post the staff application embed to the staff-app channel.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("posthighrubric").setDescription("Post the high-tier testing rubric in the current channel.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("postmediaapp").setDescription("Post the media role application embed in the current channel.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("setupqueues").setDescription("One-time setup: creates missing gamemode/tier roles and tiertest channels, posts queues.")
+    )
+    .addSubcommand((sub) =>
+      sub.setName("resetqueues").setDescription("One-time cleanup: removes duplicate tiertest channels/messages, reposts one clean queue.")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("removetester")
+        .setDescription("Remove a tester from the active testers list for this queue. (Managers only)")
+        .addUserOption((opt) =>
+          opt.setName("tester").setDescription("The tester to remove").setRequired(true)
+        )
+    ),
 
   new SlashCommandBuilder()
     .setName("jointesting")
@@ -30,24 +47,6 @@ const commands = [
     .setName("leavetesting")
     .setDescription(
       "Stop testing this queue. Run this in the queue channel."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("setupqueues")
-    .setDescription(
-      "One-time setup: creates missing gamemode/tier roles and tiertest channels, posts queues."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("resetqueues")
-    .setDescription(
-      "One-time cleanup: removes duplicate tiertest channels/messages, reposts one clean queue."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("postverifyinfo")
-    .setDescription(
-      "Post step-by-step account-linking instructions to the verify-info channel."
     ),
 
   new SlashCommandBuilder()
@@ -106,12 +105,6 @@ const commands = [
         .setDescription("Region (only needed if this player is new)")
         .setRequired(false)
         .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
-    ),
-  new SlashCommandBuilder()
-    .setName("removetester")
-    .setDescription("Remove a tester from the active testers list for this queue. (Managers only)")
-    .addUserOption((opt) =>
-      opt.setName("tester").setDescription("The tester to remove").setRequired(true)
     ),
 ];
 
