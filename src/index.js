@@ -1930,6 +1930,36 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /punish — restrict a user from queues and tickets
+  if (interaction.isChatInputCommand() && interaction.commandName === "punish") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });
+    }
+
+    const target   = interaction.options.getUser("user");
+    const duration = interaction.options.getString("duration");
+    const reason   = interaction.options.getString("reason");
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+    if (!member) {
+      return interaction.editReply({ content: "Couldn't find that user in this server." });
+    }
+
+    await member.roles.add(RESTRICTED_ROLE_ID).catch((err) => {
+      console.error("[punish] failed to add restricted role:", err.message);
+    });
+
+    const LOG_CHANNEL_ID = "1555554731265630349";
+    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (logChannel) {
+      await logChannel.send(`<@${target.id}> — Has been restricted for **${duration}** for ${reason}`);
+    }
+
+    return interaction.editReply({ content: `<@${target.id}> has been restricted.` });
+  }
 
   // /backfilllogs
   if (interaction.isChatInputCommand() && interaction.commandName === "backfilllogs") {

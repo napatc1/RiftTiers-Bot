@@ -100,6 +100,19 @@ const commands = [
         .setRequired(false)
         .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
+
+  new SlashCommandBuilder()
+    .setName("punish")
+    .setDescription("Restrict a user from queues and tickets. (Managers only)")
+    .addUserOption((opt) =>
+      opt.setName("user").setDescription("The user to restrict").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("duration").setDescription("How long the restriction lasts (e.g. 1 week, permanent)").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("reason").setDescription("Reason for the restriction").setRequired(true)
+    ),
 ];
 
 module.exports = commands;
