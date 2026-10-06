@@ -2910,6 +2910,22 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferReply({ ephemeral: true });
     try {
       const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+      // Require LT3 or better in any gamemode.
+      const LT3_OR_BETTER = ["HT1", "LT1", "HT2", "LT2", "HT3", "LT3"];
+      const { data: tiers } = await supabase
+        .from("player_tiers")
+        .select("tier")
+        .eq("player_id", player.id)
+        .in("tier", LT3_OR_BETTER)
+        .limit(1);
+      if (!tiers || tiers.length === 0) {
+        return interaction.editReply({
+          content: "You need to be **LT3 or better** in at least one gamemode to request a high tier test.",
+          components: [],
+        });
+      }
+
       const ign = player?.username && !player.username.startsWith("discord-")
         ? player.username
         : interaction.member.displayName;

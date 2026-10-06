@@ -157,10 +157,16 @@ async function createTicketChannel(guild, ticket) {
       .maybeSingle();
 
     const category = await getOrCreateTicketCategory(guild, ticket.category);
-    const suffix = ticket.category === "report" ? "report"
-      : ticket.category === "appeal" ? "appeal"
-      : ticket.category === "hightest" ? "hightest"
-      : "ticket";
+    let suffix;
+    if (ticket.category === "report") {
+      suffix = "report";
+    } else if (ticket.category === "appeal") {
+      suffix = "appeal";
+    } else if (ticket.category === "hightest") {
+      suffix = `hightest-${sanitizeChannelName(ticket.subject)}`;
+    } else {
+      suffix = "ticket";
+    }
     const channelName = `${sanitizeChannelName(player?.username)}-${suffix}`;
     const channel = await guild.channels.create({
       name: channelName,
