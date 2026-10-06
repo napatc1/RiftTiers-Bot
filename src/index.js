@@ -415,7 +415,7 @@ function buildTesterApplicationEmbed() {
     .setColor(0x6cc3ff)
     .setDescription(
       "Testers run tier tests and keep the queues moving — if you're experienced, reliable, and know the rubric, click **Apply** below.\n\n" +
-        "You'll be asked for your IGN, region, your testing/PvP experience, and your availability. Staff reviews every application — you'll be DM'd either way.\n\n" +
+        "You'll be asked about your testing/PvP experience and your availability. Your IGN and region are pulled from your verified account.\n\n" +
         "**Please provide authentic information.** A dishonest application will be denied."
     );
 }
@@ -432,15 +432,9 @@ function buildTesterApplicationModal() {
     .setTitle("Tester Application")
     .addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("experience")
-          .setLabel("Your PvP/testing experience")
+          .setLabel("Your PvP / testing experience")
           .setStyle(TextInputStyle.Paragraph)
           .setMaxLength(1000)
           .setRequired(true)
@@ -487,17 +481,19 @@ function buildMediaApplicationModal() {
     .setTitle("Media Role Application")
     .addComponents(
       new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
+        new TextInputBuilder()
+          .setCustomId("content_type")
+          .setLabel("Platform (YouTube / TikTok / Twitch / etc.)")
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder("e.g. YouTube")
+          .setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("channel_link")
-          .setLabel("Channel / Profile Link + Platform")
+          .setLabel("Channel / Profile Link")
           .setStyle(TextInputStyle.Short)
-          .setPlaceholder("e.g. YouTube: https://youtube.com/@yourchannel")
+          .setPlaceholder("https://youtube.com/@yourchannel")
           .setRequired(true)
       ),
       new ActionRowBuilder().addComponents(
@@ -2191,12 +2187,6 @@ client.on("interactionCreate", async (interaction) => {
         .setTitle("Staff Application")
         .addComponents(
           new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId("ign").setLabel("Minecraft IGN").setStyle(TextInputStyle.Short).setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
-            new TextInputBuilder().setCustomId("region").setLabel("Region (NA/EU/AS/ME/AU)").setStyle(TextInputStyle.Short).setRequired(true)
-          ),
-          new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId("why")
               .setLabel("Why do you want to be staff?")
@@ -2908,16 +2898,17 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === "staff_apply_modal") {
-    const ign = interaction.fields.getTextInputValue("ign").trim();
-    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
     const why = interaction.fields.getTextInputValue("why").trim();
     const experience = interaction.fields.getTextInputValue("experience").trim();
     const availability = interaction.fields.getTextInputValue("availability").trim();
     await interaction.deferReply({ ephemeral: true });
     try {
+      // Pull IGN + region from the player's verified account
+      const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.user.username);
+      const ign    = player.username?.startsWith("discord-") ? interaction.user.username : (player.username || interaction.user.username);
+      const region = player.region || "N/A";
       const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
-        // Use a stable pseudo-ID for staff apps: Discord snowflake (unique per user per submission)
         const staffAppId = `s_${interaction.user.id}_${Date.now()}`;
         const embed = new EmbedBuilder()
           .setTitle("Staff Application")
@@ -2944,13 +2935,21 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   if (interaction.isModalSubmit() && interaction.customId === "tester_apply_modal") {
-    const ign = interaction.fields.getTextInputValue("ign").trim();
-    const region = interaction.fields.getTextInputValue("region").trim().toUpperCase();
     const experience = interaction.fields.getTextInputValue("experience").trim();
     const availability = interaction.fields.getTextInputValue("availability").trim();
     await interaction.deferReply({ ephemeral: true });
     try {
-      const applicationId = await createTesterApplication(interaction.user.id, { ign, region, experience, availability });
+      // Pull IGN + region from the player's verified account (same as website does)
+      const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.user.username);
+      if (!player.username || player.username.startsWith("discord-")) {
+        return interaction.editReply({ content: "Your Minecraft account isn't verified yet. Verify at ryfttiers.pages.dev before applying." });
+      }
+      const applicationId = await createTesterApplication(interaction.user.id, {
+        ign: player.username,
+        region: player.region || "N/A",
+        experience,
+        availability,
+      });
       const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
         const app = await getTesterApplication(applicationId);
@@ -2963,24 +2962,30 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ content: "Application submitted! Staff will review it and DM you either way." });
     } catch (err) {
       console.error("Couldn't submit tester application:", err.message);
-      return interaction.editReply({ content: "Something went wrong submitting that. Try again or ping staff." });
+      return interaction.editReply({ content: err.message?.includes("pending") ? err.message : "Something went wrong submitting that. Try again or ping staff." });
     }
   }
 
   // Media application modal submit
   if (interaction.isModalSubmit() && interaction.customId === "media_apply_modal") {
-    const ign         = interaction.fields.getTextInputValue("ign").trim();
-    const region      = interaction.fields.getTextInputValue("region").trim().toUpperCase();
-    const channelLink = interaction.fields.getTextInputValue("channel_link").trim();
+    const contentType   = interaction.fields.getTextInputValue("content_type").trim();
+    const channelLink   = interaction.fields.getTextInputValue("channel_link").trim();
     const followerCount = interaction.fields.getTextInputValue("follower_count").trim();
-    const whyMedia    = interaction.fields.getTextInputValue("why_media").trim();
+    const whyMedia      = interaction.fields.getTextInputValue("why_media").trim();
     await interaction.deferReply({ ephemeral: true });
     try {
+      // Pull IGN + region from the player's verified account
+      const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.user.username);
+      if (!player.username || player.username.startsWith("discord-")) {
+        return interaction.editReply({ content: "Your Minecraft account isn't verified yet. Verify at ryfttiers.pages.dev before applying." });
+      }
       const applicationId = await createMediaApplication(interaction.user.id, {
-        ign, region,
-        contentType: "Discord Modal",  // platform info is embedded in channelLink
-        channelLink, followerCount,
-        sampleVideos: "",              // modal has 5-field limit; sample videos in website form only
+        ign: player.username,
+        region: player.region || "N/A",
+        contentType,
+        channelLink,
+        followerCount,
+        sampleVideos: "",
         whyMedia,
       });
       const reviewChannel = await interaction.guild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
@@ -2995,7 +3000,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({ content: "Media application submitted! Staff will review it and DM you either way." });
     } catch (err) {
       console.error("Couldn't submit media application:", err.message);
-      return interaction.editReply({ content: "Something went wrong. Try again or ping staff." });
+      return interaction.editReply({ content: err.message?.includes("pending") ? err.message : "Something went wrong. Try again or ping staff." });
     }
   }
 
@@ -3294,6 +3299,74 @@ client.once("ready", async () => {
     console.log("[startup] subscribed to media_applications");
   } catch (err) {
     console.error("[startup] failed to subscribe to media_applications:", err.message);
+  }
+
+  // Watch for new tester applications submitted from the website.
+  try {
+    const { supabase: sb } = require("./supabase");
+    sb.channel("bot-tester-applications")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "tester_applications" }, async (payload) => {
+        const app = payload.new;
+        if (!app || app.review_message_id) return; // skip if already handled by bot modal flow
+        try {
+          const reviewChannel = await guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+          if (!reviewChannel) return;
+          const reviewMsg = await reviewChannel.send({
+            embeds: [buildApplicationReviewEmbed(app)],
+            components: [buildApplicationReviewButtons("tester", app.id)],
+          });
+          await setTesterApplicationReviewMessage(app.id, reviewChannel.id, reviewMsg.id);
+        } catch (err) {
+          console.error("[tester-app] failed to post review embed:", err.message);
+        }
+      })
+      .subscribe();
+    console.log("[startup] subscribed to tester_applications");
+  } catch (err) {
+    console.error("[startup] failed to subscribe to tester_applications:", err.message);
+  }
+
+  // Watch for new staff applications submitted from the website.
+  try {
+    const { supabase: sb } = require("./supabase");
+    sb.channel("bot-staff-applications")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "staff_applications" }, async (payload) => {
+        const app = payload.new;
+        if (!app) return;
+        try {
+          const reviewChannel = await guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+          if (!reviewChannel) return;
+          const staffAppId = `s_${app.discord_id}_${app.id}`;
+          const embed = new EmbedBuilder()
+            .setTitle("Staff Application")
+            .setColor(0x2f7fd6)
+            .addFields(
+              { name: "Discord", value: `<@${app.discord_id}>`, inline: true },
+              { name: "IGN", value: app.ign, inline: true },
+              { name: "Region", value: app.region || "N/A", inline: true },
+              { name: "Why staff?", value: app.why },
+              { name: "Previous experience", value: app.experience || "None provided" },
+              { name: "Availability", value: app.availability }
+            )
+            .setTimestamp(new Date(app.created_at));
+          const reviewMsg = await reviewChannel.send({
+            embeds: [embed],
+            components: [buildApplicationReviewButtons("staff", staffAppId)],
+          });
+          // Store review message ref in DB
+          const { supabase: supaAdmin } = require("./supabase");
+          await supaAdmin
+            .from("staff_applications")
+            .update({ review_channel_id: reviewChannel.id, review_message_id: reviewMsg.id })
+            .eq("id", app.id);
+        } catch (err) {
+          console.error("[staff-app] failed to post review embed:", err.message);
+        }
+      })
+      .subscribe();
+    console.log("[startup] subscribed to staff_applications");
+  } catch (err) {
+    console.error("[startup] failed to subscribe to staff_applications:", err.message);
   }
 
   // Lock down every known tiertest channel to testers-and-up on boot, so
