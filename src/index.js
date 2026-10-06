@@ -2144,6 +2144,24 @@ client.on("interactionCreate", async (interaction) => {
       if (isRestricted(interaction.member) && category !== "appeal" && category !== "help") {
         return interaction.reply({ content: "You are restricted. You may only open a Help or Appeal ticket.", ephemeral: true });
       }
+      if (category === "hightest") {
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("hightest_gamemode_select")
+            .setPlaceholder("Select a gamemode…")
+            .addOptions(
+              GAMEMODES.map((gm) => ({
+                label: GAMEMODE_PING_ROLE_NAMES[gm] || gm,
+                value: gm,
+              }))
+            )
+        );
+        return interaction.reply({
+          content: "Select the gamemode for your high tier test:",
+          components: [row],
+          ephemeral: true,
+        });
+      }
       return interaction.showModal(buildTicketModal(category));
     }
 
@@ -2870,6 +2888,35 @@ client.on("interactionCreate", async (interaction) => {
       content: `Head to ${channel} and use the **Join Queue** button there once it's open.${roleNote}`,
       ephemeral: true,
     });
+  }
+
+  // ---------- hightest gamemode picker ----------
+  if (interaction.isStringSelectMenu() && interaction.customId === "hightest_gamemode_select") {
+    const gamemode = interaction.values[0];
+    const gmDisplay = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+      const ign = player?.username && !player.username.startsWith("discord-")
+        ? player.username
+        : interaction.member.displayName;
+      const region = player?.region || "N/A";
+      const details = `High tier test request for ${gmDisplay}. IGN: ${ign}, Region: ${region}.`;
+      await createSupportTicketFromDiscord(
+        interaction.user.id,
+        interaction.member?.displayName || interaction.user.username,
+        "hightest",
+        gmDisplay,
+        details
+      );
+      return interaction.editReply({
+        content: `Your high tier test request for **${gmDisplay}** has been submitted — a private channel will appear here shortly.`,
+        components: [],
+      });
+    } catch (err) {
+      console.error("Couldn't create hightest ticket:", err.message);
+      return interaction.editReply({ content: "Something went wrong creating that ticket. Try again or ping staff.", components: [] });
+    }
   }
 
   // ---------- modal submit ----------
