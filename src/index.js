@@ -465,7 +465,7 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 }
 
 const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
-const MEDIA_APP_REVIEW_CHANNEL_ID = "1556650541696946338";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1555554767210811442";
 
 function buildApplicationReviewButtons(type, applicationId) {
   // type: "tester" | "staff" | "media"
