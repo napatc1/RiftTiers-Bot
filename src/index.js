@@ -1099,7 +1099,7 @@ client.on("interactionCreate", async (interaction) => {
  try {
 
   // /util sendrules — posts the server rules embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "sendrules") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "sendrules") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1123,7 +1123,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // /util poststaffapp — posts a staff application form embed with an Apply button
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "poststaffapp") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "poststaffapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1158,7 +1158,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // /util postmediaapp — posts the media role application form embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "postmediaapp") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postmediaapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1187,8 +1187,21 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Media application embed posted!" });
   }
 
+  // /util posthightestpanel — posts the high tier test request panel in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.channel.send({
+      embeds: [buildRequestHighTestEmbed()],
+      components: [buildRequestHighTestButton()],
+    });
+    return interaction.editReply({ content: "High tier test panel posted!" });
+  }
+
   // /util posthighrubric — posts the high-tier testing rubric to the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "posthighrubric") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthighrubric") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1236,7 +1249,7 @@ client.on("interactionCreate", async (interaction) => {
   // and posts a fresh queue message in every channel that doesn't already
   // have one tracked. Safe to re-run after adding a new gamemode to
   // GAMEMODE_CHANNELS — it only touches what's missing.
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "setupqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "setupqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1575,7 +1588,7 @@ client.on("interactionCreate", async (interaction) => {
   // any extras), renames it to its proper emoji name, purges every message
   // in it, and re-posts exactly one fresh queue card (plus one high-queue
   // card), both closed.
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "resetqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "resetqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1709,7 +1722,7 @@ client.on("interactionCreate", async (interaction) => {
 
   // /postverifyinfo — posts step-by-step "how to link your account" info to
   // the verify channel. Staff-only, meant to be run once (or again after an edit).
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "postverifyinfo") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postverifyinfo") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1868,7 +1881,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   // /util removetester — managers/owners can kick any tester off the active list
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getSubcommand() === "removetester") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "removetester") {
     const roles = computeRoleFlags(interaction.member);
     if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
       return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });

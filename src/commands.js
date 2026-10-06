@@ -7,34 +7,28 @@ const commands = [
   new SlashCommandBuilder()
     .setName("util")
     .setDescription("Staff utility commands.")
-    .addSubcommand((sub) =>
-      sub.setName("sendrules").setDescription("Post the server rules embed in the current channel.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("postverifyinfo").setDescription("Post step-by-step account-linking instructions to the verify-info channel.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("poststaffapp").setDescription("Post the staff application embed to the staff-app channel.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("posthighrubric").setDescription("Post the high-tier testing rubric in the current channel.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("postmediaapp").setDescription("Post the media role application embed in the current channel.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("setupqueues").setDescription("One-time setup: creates missing gamemode/tier roles and tiertest channels, posts queues.")
-    )
-    .addSubcommand((sub) =>
-      sub.setName("resetqueues").setDescription("One-time cleanup: removes duplicate tiertest channels/messages, reposts one clean queue.")
-    )
-    .addSubcommand((sub) =>
-      sub
-        .setName("removetester")
-        .setDescription("Remove a tester from the active testers list for this queue. (Managers only)")
-        .addUserOption((opt) =>
-          opt.setName("tester").setDescription("The tester to remove").setRequired(true)
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("Which utility to run")
+        .setRequired(true)
+        .addChoices(
+          { name: "sendrules",         value: "sendrules" },
+          { name: "postverifyinfo",    value: "postverifyinfo" },
+          { name: "poststaffapp",      value: "poststaffapp" },
+          { name: "posthighrubric",    value: "posthighrubric" },
+          { name: "postmediaapp",      value: "postmediaapp" },
+          { name: "posthightestpanel", value: "posthightestpanel" },
+          { name: "setupqueues",       value: "setupqueues" },
+          { name: "resetqueues",       value: "resetqueues" },
+          { name: "removetester",      value: "removetester" }
         )
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("tester")
+        .setDescription("Tester to remove (only for removetester action)")
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
