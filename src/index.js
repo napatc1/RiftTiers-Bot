@@ -3292,8 +3292,14 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app) return;
         try {
-          const reviewChannel = await appGuild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
-          if (!reviewChannel) return;
+          const reviewChannel = await appGuild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch((e) => {
+            console.error("[media-app] channel fetch failed:", e.message);
+            return null;
+          });
+          if (!reviewChannel) {
+            console.error("[media-app] review channel not found:", MEDIA_APP_REVIEW_CHANNEL_ID);
+            return;
+          }
           const reviewMsg = await reviewChannel.send({
             embeds: [buildMediaReviewEmbed(app)],
             components: [buildApplicationReviewButtons("media", app.id)],
