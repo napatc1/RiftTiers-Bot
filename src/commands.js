@@ -5,20 +5,32 @@ const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
 const commands = [
   new SlashCommandBuilder()
-    .setName("sendrules")
-    .setDescription("Post the server rules embed in the current channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("poststaffapp")
-    .setDescription("Post the staff application embed to the staff-app channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("postmediaapp")
-    .setDescription("Post the media role application embed in the current channel. (Staff only)"),
-
-  new SlashCommandBuilder()
-    .setName("posthighrubric")
-    .setDescription("Post the high-tier testing rubric in the current channel. (Staff only)"),
+    .setName("util")
+    .setDescription("Staff utility commands.")
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("Which utility to run")
+        .setRequired(true)
+        .addChoices(
+          { name: "sendrules",         value: "sendrules" },
+          { name: "postverifyinfo",    value: "postverifyinfo" },
+          { name: "poststaffapp",      value: "poststaffapp" },
+          { name: "posthighrubric",    value: "posthighrubric" },
+          { name: "postmediaapp",      value: "postmediaapp" },
+          { name: "posthightestpanel", value: "posthightestpanel" },
+          { name: "setupqueues",         value: "setupqueues" },
+          { name: "resetqueues",         value: "resetqueues" },
+          { name: "removetester",        value: "removetester" },
+          { name: "syncverifiedroles",   value: "syncverifiedroles" }
+        )
+    )
+    .addUserOption((opt) =>
+      opt
+        .setName("tester")
+        .setDescription("Tester to remove (only for removetester action)")
+        .setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName("jointesting")
@@ -30,24 +42,6 @@ const commands = [
     .setName("leavetesting")
     .setDescription(
       "Stop testing this queue. Run this in the queue channel."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("setupqueues")
-    .setDescription(
-      "One-time setup: creates missing gamemode/tier roles and tiertest channels, posts queues."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("resetqueues")
-    .setDescription(
-      "One-time cleanup: removes duplicate tiertest channels/messages, reposts one clean queue."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("postverifyinfo")
-    .setDescription(
-      "Post step-by-step account-linking instructions to the verify-info channel."
     ),
 
   new SlashCommandBuilder()
@@ -107,11 +101,113 @@ const commands = [
         .setRequired(false)
         .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
     ),
+
   new SlashCommandBuilder()
-    .setName("removetester")
-    .setDescription("Remove a tester from the active testers list for this queue. (Managers only)")
+    .setName("coins")
+    .setDescription("Check your coin balance (or another player's).")
     .addUserOption((opt) =>
-      opt.setName("tester").setDescription("The tester to remove").setRequired(true)
+      opt.setName("player").setDescription("Player to check (leave blank for yourself)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Claim your daily coin reward."),
+
+  new SlashCommandBuilder()
+    .setName("shop")
+    .setDescription("View the coin shop."),
+
+  new SlashCommandBuilder()
+    .setName("coinflip")
+    .setDescription("Flip a coin — guess heads or tails to double your bet.")
+    .addStringOption((opt) =>
+      opt.setName("choice").setDescription("Heads or tails?").setRequired(true)
+        .addChoices({ name: "Heads", value: "heads" }, { name: "Tails", value: "tails" })
+    )
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("dice")
+    .setDescription("Roll two dice — guess under 7, exactly 7, or over 7.")
+    .addStringOption((opt) =>
+      opt.setName("guess").setDescription("Your prediction").setRequired(true)
+        .addChoices(
+          { name: "Under 7",    value: "under" },
+          { name: "Exactly 7",  value: "seven" },
+          { name: "Over 7",     value: "over"  },
+        )
+    )
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("slots")
+    .setDescription("Spin the slot machine.")
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("leaderboard")
+    .setDescription("Show the top 10 players by coin balance."),
+
+  new SlashCommandBuilder()
+    .setName("bank")
+    .setDescription("Deposit, withdraw, or check your bank balance (earns 2% daily interest).")
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("What to do")
+        .setRequired(true)
+        .addChoices(
+          { name: "balance",  value: "balance"  },
+          { name: "deposit",  value: "deposit"  },
+          { name: "withdraw", value: "withdraw" },
+        )
+    )
+    .addIntegerOption((opt) =>
+      opt.setName("amount").setDescription("Amount (for deposit/withdraw)").setRequired(false).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("gift")
+    .setDescription("Gift a shop item to another player (500 coins cheaper than buying for yourself).")
+    .addStringOption((opt) =>
+      opt
+        .setName("item")
+        .setDescription("Item to gift")
+        .setRequired(true)
+        .addChoices(
+          { name: "Cooldown Removal — 0 🪙",    value: "cooldown_remove" },
+          { name: "Extra Queue Slot — 300 🪙",  value: "extra_slot" },
+          { name: "VIP Role — 1000 🪙",         value: "vip_role" },
+        )
+    )
+    .addUserOption((opt) =>
+      opt.setName("player").setDescription("Player to gift to").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("gamemode")
+        .setDescription("Gamemode (only needed for Cooldown Removal)")
+        .setRequired(false)
+        .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
+    ),
+
+  new SlashCommandBuilder()
+    .setName("punish")
+    .setDescription("Restrict a user from queues and tickets. (Managers only)")
+    .addUserOption((opt) =>
+      opt.setName("user").setDescription("The user to restrict").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("duration").setDescription("How long the restriction lasts (e.g. 1 week, permanent)").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("reason").setDescription("Reason for the restriction").setRequired(true)
     ),
 
   new SlashCommandBuilder()

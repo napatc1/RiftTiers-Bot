@@ -49,6 +49,12 @@ const {
   gamemodeForChannelName,
   regionForChannelName,
   RESTRICTED_ROLE_ID,
+  COIN_REWARDS,
+  MILESTONE_TIERS,
+  SHOP_ITEMS,
+  GIFT_DISCOUNT,
+  BANK_DAILY_INTEREST_RATE,
+  VIP_ROLE_ID,
 } = require("./config");
 const {
   supabase,
@@ -100,6 +106,20 @@ const {
   getMediaApplication,
   setMediaApplicationReviewMessage,
   decideMediaApplication,
+  getCoins,
+  addCoins,
+  spendCoins,
+  claimDaily,
+  getExtraQueueSlots,
+  addExtraQueueSlot,
+  hasVipRole,
+  setVipRolePurchased,
+  transferCoins,
+  accrueInterest,
+  getBankBalance,
+  bankDeposit,
+  bankWithdraw,
+  getCoinLeaderboard,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -233,7 +253,7 @@ function buildVerifyInfoEmbed() {
     .setDescription(
       "Verification is done entirely on the website — no bot commands needed.\n\n" +
         "**1. Log into the website**\nOpen the RyftTiers website and click **Login with Discord** in the top-right corner.\n\n" +
-        "**2. Link your Minecraft username**\nHead to the **Verify** tab at https://napatc1.github.io/RiftTiers-Website/Verify and enter your IGN and platform (Bedrock/Premium/Cracked). This tells us which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
+        "**2. Link your Minecraft username**\nHead to the **Verify** tab at https://ryfttiers.pages.dev/Verify and enter your IGN and platform (Bedrock/Premium/Cracked). This tells us which Minecraft account is yours so testers can see it and your tier shows up correctly on the leaderboard.\n\n" +
         "Once both steps are done, you can join a tiertest queue from Discord **or** the website — they're the same queue."
     )
     .setColor(0x3fa0f5);
@@ -271,7 +291,7 @@ function buildTestingRulesetEmbed() {
     .setColor(0x3fa0f5)
     .setDescription(
       "**Before you queue**\n" +
-        "• You must be verified ([Verify tab](https://napatc1.github.io/RiftTiers-Website/Verify)) before you can join any queue.\n" +
+        "• You must be verified ([Verify tab](https://ryfttiers.pages.dev/Verify)) before you can join any queue.\n" +
         `• You're on a ${COOLDOWN_DAYS}-day cooldown after each result for that gamemode — you can't be retested sooner unless staff lifts it.\n` +
         "• Only queue in the region you'll actually be able to play on. Testers match you to testers in your set region.\n\n" +
         "**During a test**\n" +
@@ -313,7 +333,7 @@ function buildRequestTestEmbed() {
     .setColor(0xffd54a)
     .setDescription(
       "Pick a gamemode below and I'll point you to its queue channel. You'll join the actual queue from there — this is just the signpost.\n\n" +
-        "Make sure you've verified first — <https://napatc1.github.io/RiftTiers-Website/Verify> — you can't join a queue until you have."
+        "Make sure you've verified first — <https://ryfttiers.pages.dev/Verify> — you can't join a queue until you have."
     );
 }
 
@@ -355,7 +375,7 @@ function buildRequestHighTestEmbed() {
     .setColor(0xff8c3f)
     .setDescription(
       "Already **LT3 or better**? Click **Request High Test** below to open a ticket — staff will set up your test from there.\n\n" +
-        "Make sure you've verified first — <https://napatc1.github.io/RiftTiers-Website/Verify>."
+        "Make sure you've verified first — <https://ryfttiers.pages.dev/Verify>."
     );
 }
 
@@ -465,7 +485,7 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 }
 
 const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
-const MEDIA_APP_REVIEW_CHANNEL_ID = "1556650541696946338";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1555554767210811442";
 
 function buildApplicationReviewButtons(type, applicationId) {
   // type: "tester" | "staff" | "media"
@@ -525,7 +545,6 @@ function buildMediaReviewEmbed(app, statusLine = "") {
       `**Region:** ${app.region}\n\n` +
       `**Channel / Platform**\n${app.channel_link}\n\n` +
       `**Followers:** ${app.follower_count}\n\n` +
-      `**Sample Videos**\n${app.sample_videos || "—"}\n\n` +
       `**Why Media Role?**\n${app.why_media}` +
       statusLine
     );
@@ -971,7 +990,7 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
   const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[testeePlatform] || "Unknown";
   const testeeInfoLine = testeeUsername
     ? `**IGN:** ${testeeUsername} (${platformLabel})\n**Region:** ${testeeRecord?.region || "Unverified/new"}\n`
-    : `**IGN:** Not verified — ask them to verify at https://napatc1.github.io/RiftTiers-Website/Verify\n`;
+    : `**IGN:** Not verified — ask them to verify at https://ryfttiers.pages.dev/Verify\n`;
 
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
@@ -1099,8 +1118,8 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
 client.on("interactionCreate", async (interaction) => {
  try {
 
-  // /sendrules — posts the server rules embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "sendrules") {
+  // /util sendrules — posts the server rules embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "sendrules") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1123,8 +1142,8 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Rules posted!" });
   }
 
-  // /poststaffapp — posts a staff application form embed with an Apply button
-  if (interaction.isChatInputCommand() && interaction.commandName === "poststaffapp") {
+  // /util poststaffapp — posts a staff application form embed with an Apply button
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "poststaffapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1158,8 +1177,8 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Staff application posted!" });
   }
 
-  // /postmediaapp — posts the media role application form embed in the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "postmediaapp") {
+  // /util postmediaapp — posts the media role application form embed in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postmediaapp") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1188,8 +1207,21 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Media application embed posted!" });
   }
 
-  // /posthighrubric — posts the high-tier testing rubric to the current channel
-  if (interaction.isChatInputCommand() && interaction.commandName === "posthighrubric") {
+  // /util posthightestpanel — posts the high tier test request panel in the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    await interaction.channel.send({
+      embeds: [buildRequestHighTestEmbed()],
+      components: [buildRequestHighTestButton()],
+    });
+    return interaction.editReply({ content: "High tier test panel posted!" });
+  }
+
+  // /util posthighrubric — posts the high-tier testing rubric to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthighrubric") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
     }
@@ -1237,7 +1269,7 @@ client.on("interactionCreate", async (interaction) => {
   // and posts a fresh queue message in every channel that doesn't already
   // have one tracked. Safe to re-run after adding a new gamemode to
   // GAMEMODE_CHANNELS — it only touches what's missing.
-  if (interaction.isChatInputCommand() && interaction.commandName === "setupqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "setupqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1576,7 +1608,7 @@ client.on("interactionCreate", async (interaction) => {
   // any extras), renames it to its proper emoji name, purges every message
   // in it, and re-posts exactly one fresh queue card (plus one high-queue
   // card), both closed.
-  if (interaction.isChatInputCommand() && interaction.commandName === "resetqueues") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "resetqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1703,14 +1735,14 @@ client.on("interactionCreate", async (interaction) => {
   // /verify — disabled; players must verify through the website
   if (interaction.isChatInputCommand() && interaction.commandName === "verify") {
     return interaction.reply({
-      content: "Verification is done on the website — head to https://napatc1.github.io/RiftTiers-Website/Verify to link your Minecraft account.",
+      content: "Verification is done on the website — head to https://ryfttiers.pages.dev/Verify to link your Minecraft account.",
       ephemeral: true,
     });
   }
 
   // /postverifyinfo — posts step-by-step "how to link your account" info to
   // the verify channel. Staff-only, meant to be run once (or again after an edit).
-  if (interaction.isChatInputCommand() && interaction.commandName === "postverifyinfo") {
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postverifyinfo") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
@@ -1754,7 +1786,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({
         content: tester?.region
           ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
-          : "You don't have a region set yet — set your region at https://napatc1.github.io/RiftTiers-Website/Verify, then try again.",
+          : "You don't have a region set yet — set your region at https://ryfttiers.pages.dev/Verify, then try again.",
         ephemeral: true,
       });
     }
@@ -1868,8 +1900,8 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
-  // /removetester — managers/owners can kick any tester off the active list
-  if (interaction.isChatInputCommand() && interaction.commandName === "removetester") {
+  // /util removetester — managers/owners can kick any tester off the active list
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "removetester") {
     const roles = computeRoleFlags(interaction.member);
     if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
       return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });
@@ -1918,6 +1950,401 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /util syncverifiedroles — bulk-grant the Verified role to everyone already in players
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "syncverifiedroles") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers/owners can run this.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const VERIFIED_ROLE_ID = "1556203882529558539";
+    const verifiedRole = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
+    if (!verifiedRole) {
+      return interaction.editReply({ content: `Verified role (ID \`${VERIFIED_ROLE_ID}\`) not found on this server.` });
+    }
+
+    // Fetch all player rows that have a discord_id
+    const { supabase: sb } = require("./supabase");
+    const { data: players, error } = await sb
+      .from("players")
+      .select("discord_id")
+      .not("discord_id", "is", null);
+
+    if (error) return interaction.editReply({ content: `Supabase error: ${error.message}` });
+    if (!players || players.length === 0) return interaction.editReply({ content: "No verified players found in the database." });
+
+    let granted = 0, skipped = 0, notInServer = 0;
+    for (const row of players) {
+      const member = await interaction.guild.members.fetch(row.discord_id).catch(() => null);
+      if (!member) { notInServer++; continue; }
+      if (member.roles.cache.has(VERIFIED_ROLE_ID)) { skipped++; continue; }
+      await member.roles.add(verifiedRole).catch(() => {});
+      granted++;
+    }
+
+    return interaction.editReply({
+      content: `✅ Sync complete.\n• **${granted}** members granted Verified role\n• **${skipped}** already had it\n• **${notInServer}** not in server`,
+    });
+  }
+
+  // /leaderboard — top 10 by coins
+  if (interaction.isChatInputCommand() && interaction.commandName === "leaderboard") {
+    await interaction.deferReply();
+    const rows = await getCoinLeaderboard(10);
+    if (!rows.length) return interaction.editReply({ content: "No players found." });
+    const medals = ["🥇","🥈","🥉"];
+    const lines = rows.map((r, i) => {
+      const prefix = medals[i] || `**${i + 1}.**`;
+      const name   = r.discord_id ? `<@${r.discord_id}>` : `**${r.username || "Unknown"}**`;
+      return `${prefix} ${name} — **${r.coins} 🪙**`;
+    });
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 Coin Leaderboard")
+      .setColor(0xf5a623)
+      .setDescription(lines.join("\n"))
+      .setFooter({ text: "Top 10 players by wallet balance" });
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  // /bank — deposit, withdraw, balance (earns 2% daily interest)
+  if (interaction.isChatInputCommand() && interaction.commandName === "bank") {
+    const action = interaction.options.getString("action");
+    const amount = interaction.options.getInteger("amount");
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+    // Always accrue interest first
+    const { interest_earned } = await accrueInterest(player.id);
+    const interestNote = interest_earned > 0 ? `\n> 📈 Interest credited: **+${interest_earned} coins**!` : "";
+
+    if (action === "balance") {
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({
+        content: `🏦 **Bank Balance:** **${bank} coins**\n👛 **Wallet:** **${wallet} coins**\n> Interest rate: ${BANK_DAILY_INTEREST_RATE * 100}% per day${interestNote}`,
+      });
+    }
+
+    if (action === "deposit") {
+      if (!amount) return interaction.editReply({ content: "Specify an amount: `/bank action:deposit amount:500`" });
+      const ok = await bankDeposit(player.id, amount);
+      if (!ok) {
+        const wallet = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins in wallet. You have **${wallet}**, tried to deposit **${amount}**.${interestNote}` });
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({ content: `✅ Deposited **${amount} coins** into the bank.\n🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**${interestNote}` });
+    }
+
+    if (action === "withdraw") {
+      if (!amount) return interaction.editReply({ content: "Specify an amount: `/bank action:withdraw amount:500`" });
+      const ok = await bankWithdraw(player.id, amount);
+      if (!ok) {
+        const bank = await getBankBalance(player.id);
+        return interaction.editReply({ content: `Not enough coins in bank. You have **${bank}**, tried to withdraw **${amount}**.${interestNote}` });
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({ content: `✅ Withdrew **${amount} coins** from the bank.\n🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**${interestNote}` });
+    }
+  }
+
+  // /coins — check coin balance
+  if (interaction.isChatInputCommand() && interaction.commandName === "coins") {
+    await interaction.deferReply({ ephemeral: true });
+    const target = interaction.options.getUser("player");
+    let player;
+    if (target) {
+      player = await ensurePlayerForDiscordUser(target.id, target.username);
+    } else {
+      player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    }
+    const bal = await getCoins(player.id);
+    const name = target ? `<@${target.id}>` : "You";
+    return interaction.editReply({ content: `${name} have **${bal} coins** 🪙` });
+  }
+
+  // /daily — claim daily coins
+  if (interaction.isChatInputCommand() && interaction.commandName === "daily") {
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const result = await claimDaily(player.id);
+    if (!result.success) {
+      const h = Math.floor(result.msLeft / 3600000);
+      const m = Math.floor((result.msLeft % 3600000) / 60000);
+      return interaction.editReply({ content: `You already claimed today. Come back in **${h}h ${m}m**.` });
+    }
+    const bal = await getCoins(player.id);
+    return interaction.editReply({ content: `You claimed **${COIN_REWARDS.DAILY} coins** 🪙 — balance: **${bal} coins**` });
+  }
+
+  // /shop — view shop
+  if (interaction.isChatInputCommand() && interaction.commandName === "shop") {
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    const lines = Object.entries(SHOP_ITEMS).map(([, v]) => `**${v.name}** — ${v.price} coins\n> ${v.description}`);
+    const embed = new EmbedBuilder()
+      .setTitle("Coin Shop 🪙")
+      .setDescription(lines.join("\n\n"))
+      .setFooter({ text: `Your balance: ${bal} coins` })
+      .setColor(0xf5c842);
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("shop_buy_cooldown_remove").setLabel("Cooldown Removal — 500 🪙").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("shop_buy_extra_slot").setLabel("Extra Queue Slot — 800 🪙").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("shop_buy_vip_role").setLabel("VIP Role — 1500 🪙").setStyle(ButtonStyle.Success),
+    );
+    return interaction.reply({ embeds: [embed], components: [row1], ephemeral: true });
+  }
+
+  // Shop buy buttons
+  if (interaction.isButton() && interaction.customId.startsWith("shop_buy_")) {
+    const itemKey = interaction.customId.replace("shop_buy_", "");
+    const item = SHOP_ITEMS[itemKey];
+    if (!item) return interaction.reply({ content: "Unknown item.", ephemeral: true });
+
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+    if (itemKey === "cooldown_remove") {
+      // Show gamemode selector
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("shop_cooldown_gamemode")
+          .setPlaceholder("Select gamemode")
+          .addOptions(GAMEMODES.map((gm) => ({ label: gm, value: gm })))
+      );
+      return interaction.editReply({ content: "Which gamemode's cooldown do you want to remove?", components: [row] });
+    }
+
+    if (itemKey === "extra_slot") {
+      const slots = await getExtraQueueSlots(player.id);
+      if (slots >= 2) return interaction.editReply({ content: "You already have the maximum 2 extra queue slots." });
+      const ok = await spendCoins(player.id, item.price);
+      if (!ok) {
+        const bal = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
+      }
+      await addExtraQueueSlot(player.id);
+      return interaction.editReply({ content: `✅ Extra queue slot purchased! You now have **${slots + 1}** extra slot(s). (-${item.price} coins)`, components: [] });
+    }
+
+    if (itemKey === "vip_role") {
+      if (!VIP_ROLE_ID) return interaction.editReply({ content: "VIP role is not configured yet." });
+      const already = await hasVipRole(player.id);
+      if (already) return interaction.editReply({ content: "You already have the VIP role." });
+      const ok = await spendCoins(player.id, item.price);
+      if (!ok) {
+        const bal = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
+      }
+      await setVipRolePurchased(player.id);
+      const guildMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (guildMember) await guildMember.roles.add(VIP_ROLE_ID).catch(() => {});
+      return interaction.editReply({ content: `✅ VIP role purchased! (-${item.price} coins)`, components: [] });
+    }
+  }
+
+  // Shop cooldown gamemode select
+  if (interaction.isStringSelectMenu() && interaction.customId === "shop_cooldown_gamemode") {
+    const gamemode = interaction.values[0];
+    const item = SHOP_ITEMS.cooldown_remove;
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const ok = await spendCoins(player.id, item.price);
+    if (!ok) {
+      const bal = await getCoins(player.id);
+      return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.`, components: [] });
+    }
+    await clearCooldown(gamemode, interaction.user.id);
+    return interaction.editReply({ content: `✅ Cooldown removed for **${gamemode}**! (-${item.price} coins)`, components: [] });
+  }
+
+  // /coinflip
+  if (interaction.isChatInputCommand() && interaction.commandName === "coinflip") {
+    const choice = interaction.options.getString("choice");
+    const bet    = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const result = Math.random() < 0.5 ? "heads" : "tails";
+    const emoji  = result === "heads" ? "🪙" : "🌑";
+    if (result === choice) {
+      await addCoins(player.id, bet);
+      return interaction.editReply({ content: `${emoji} **${result.charAt(0).toUpperCase() + result.slice(1)}!** You guessed right — **+${bet} coins**! Balance: **${bal + bet}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `${emoji} **${result.charAt(0).toUpperCase() + result.slice(1)}!** Wrong guess — **-${bet} coins**. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /dice — two dice, under/exactly/over 7
+  if (interaction.isChatInputCommand() && interaction.commandName === "dice") {
+    const guess = interaction.options.getString("guess");
+    const bet   = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+    const sum = d1 + d2;
+    const faces = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"];
+    const display = `${faces[d1-1]} + ${faces[d2-1]} = **${sum}**`;
+    // Under/over pay 1:1; exactly 7 pays 4:1 (17% chance)
+    const actual = sum < 7 ? "under" : sum === 7 ? "seven" : "over";
+    const win = actual === guess;
+    const mult = guess === "seven" ? 4 : 1;
+    if (win) {
+      const won = bet * mult;
+      await addCoins(player.id, won);
+      return interaction.editReply({ content: `🎲 ${display}\n✅ Correct! **+${won} coins**${mult > 1 ? ` (${mult}x)` : ""}! Balance: **${bal + won}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `🎲 ${display}\n❌ Wrong — **-${bet} coins**. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /slots
+  if (interaction.isChatInputCommand() && interaction.commandName === "slots") {
+    const bet = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const symbols = ["🍒","🍋","🍊","⭐","💎","7️⃣"];
+    const weights  = [30,  25,  20,  15,  7,   3];
+    function spin() {
+      const total = weights.reduce((a, b) => a + b, 0);
+      let r = Math.random() * total;
+      for (let i = 0; i < symbols.length; i++) { r -= weights[i]; if (r <= 0) return i; }
+      return 0;
+    }
+    const s = [spin(), spin(), spin()];
+    const display = `[ ${symbols[s[0]]} | ${symbols[s[1]]} | ${symbols[s[2]]} ]`;
+    let mult = 0;
+    if (s[0] === s[1] && s[1] === s[2]) {
+      mult = s[0] === 5 ? 10 : s[0] === 4 ? 5 : s[0] === 3 ? 3 : 2; // 7️⃣=10x, 💎=5x, ⭐=3x, else=2x
+    } else if (s[0] === s[1] || s[1] === s[2] || s[0] === s[2]) {
+      mult = 0; // partial match = lose
+    }
+    if (mult > 0) {
+      const won = bet * (mult - 1);
+      await addCoins(player.id, won);
+      return interaction.editReply({ content: `🎰 ${display}\n✨ **${mult}x WIN!** +${won} coins! Balance: **${bal + won}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /gift — gift a shop item to another player at a discounted price
+  if (interaction.isChatInputCommand() && interaction.commandName === "gift") {
+    const itemKey   = interaction.options.getString("item");
+    const targetUser = interaction.options.getUser("player");
+    const gamemode   = interaction.options.getString("gamemode");
+
+    if (targetUser.id === interaction.user.id) {
+      return interaction.reply({ content: "You can't gift an item to yourself — use `/shop` instead.", ephemeral: true });
+    }
+    if (targetUser.bot) {
+      return interaction.reply({ content: "You can't gift items to bots.", ephemeral: true });
+    }
+
+    const item = SHOP_ITEMS[itemKey];
+    if (!item) return interaction.reply({ content: "Unknown item.", ephemeral: true });
+    const giftPrice = Math.max(0, item.price - GIFT_DISCOUNT);
+
+    if (itemKey === "cooldown_remove" && !gamemode) {
+      return interaction.reply({ content: "You must specify a **gamemode** when gifting a Cooldown Removal.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const sender = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    if (!targetMember) return interaction.editReply({ content: "That player isn't in this server." });
+    const recipient = await ensurePlayerForDiscordUser(targetUser.id, targetMember.displayName);
+
+    // Deduct coins from sender (free items still go through the check for consistency)
+    if (giftPrice > 0) {
+      const ok = await spendCoins(sender.id, giftPrice);
+      if (!ok) {
+        const bal = await getCoins(sender.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, gifting this costs **${giftPrice}**.` });
+      }
+    }
+
+    // Apply the item to the recipient
+    if (itemKey === "cooldown_remove") {
+      await clearCooldown(gamemode, targetUser.id);
+      return interaction.editReply({
+        content: `🎁 Gifted **Cooldown Removal** (${gamemode}) to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
+    }
+
+    if (itemKey === "extra_slot") {
+      const slots = await getExtraQueueSlots(recipient.id);
+      if (slots >= 2) {
+        // Refund the sender since the gift can't be applied
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: `${targetUser.username} already has the maximum 2 extra queue slots. Your coins were refunded.` });
+      }
+      await addExtraQueueSlot(recipient.id);
+      return interaction.editReply({
+        content: `🎁 Gifted **Extra Queue Slot** to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
+    }
+
+    if (itemKey === "vip_role") {
+      if (!VIP_ROLE_ID) {
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: "VIP role is not configured yet. Your coins were refunded." });
+      }
+      const already = await hasVipRole(recipient.id);
+      if (already) {
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: `${targetUser.username} already has the VIP role. Your coins were refunded.` });
+      }
+      await setVipRolePurchased(recipient.id);
+      await targetMember.roles.add(VIP_ROLE_ID).catch(() => {});
+      return interaction.editReply({
+        content: `🎁 Gifted **VIP Role** to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
+    }
+  }
+
+  // /punish — restrict a user from queues and tickets
+  if (interaction.isChatInputCommand() && interaction.commandName === "punish") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isModerator && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers can use this command.", ephemeral: true });
+    }
+
+    const target   = interaction.options.getUser("user");
+    const duration = interaction.options.getString("duration");
+    const reason   = interaction.options.getString("reason");
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+    if (!member) {
+      return interaction.editReply({ content: "Couldn't find that user in this server." });
+    }
+
+    await member.roles.add(RESTRICTED_ROLE_ID).catch((err) => {
+      console.error("[punish] failed to add restricted role:", err.message);
+    });
+
+    const LOG_CHANNEL_ID = "1555554731265630349";
+    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
+    if (logChannel) {
+      await logChannel.send(`<@${target.id}> — Has been restricted for **${duration}** for ${reason}`);
+    }
+
+    return interaction.editReply({ content: `<@${target.id}> has been restricted.` });
+  }
 
   // /announce
   if (interaction.isChatInputCommand() && interaction.commandName === "announce") {
@@ -2103,7 +2530,7 @@ client.on("interactionCreate", async (interaction) => {
       username = await getVerifiedUsername(pingedPlayer.id);
       if (!username) {
         return interaction.reply({
-          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them verify at https://napatc1.github.io/RiftTiers-Website/Verify first, or type the "username" option manually instead.`,
+          content: `<@${pingedPlayer.id}> hasn't linked a Minecraft username yet — have them verify at https://ryfttiers.pages.dev/Verify first, or type the "username" option manually instead.`,
           ephemeral: true,
         });
       }
@@ -2190,6 +2617,24 @@ client.on("interactionCreate", async (interaction) => {
       const category = interaction.customId.replace("ticket_cat_", "");
       if (isRestricted(interaction.member) && category !== "appeal" && category !== "help") {
         return interaction.reply({ content: "You are restricted. You may only open a Help or Appeal ticket.", ephemeral: true });
+      }
+      if (category === "hightest") {
+        const row = new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("hightest_gamemode_select")
+            .setPlaceholder("Select a gamemode…")
+            .addOptions(
+              GAMEMODES.map((gm) => ({
+                label: GAMEMODE_PING_ROLE_NAMES[gm] || gm,
+                value: gm,
+              }))
+            )
+        );
+        return interaction.reply({
+          content: "Select the gamemode for your high tier test:",
+          components: [row],
+          ephemeral: true,
+        });
       }
       return interaction.showModal(buildTicketModal(category));
     }
@@ -2427,7 +2872,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!tester?.region) {
         return {
           ok: false,
-          message: "You don't have a region set yet — set your region on the website: <https://napatc1.github.io/RiftTiers-Website/Verify> — then try again.",
+          message: "You don't have a region set yet — set your region on the website: <https://ryfttiers.pages.dev/Verify> — then try again.",
         };
       }
       if (tester.region !== region) {
@@ -2881,7 +3326,7 @@ client.on("interactionCreate", async (interaction) => {
     const requester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
     if (!requester?.region) {
       return interaction.reply({
-        content: "You need to set your region first — head to the website: <https://napatc1.github.io/RiftTiers-Website/Verify>, then come back here.",
+        content: "You need to set your region first — head to the website: <https://ryfttiers.pages.dev/Verify>, then come back here.",
         ephemeral: true,
       });
     }
@@ -2917,6 +3362,51 @@ client.on("interactionCreate", async (interaction) => {
       content: `Head to ${channel} and use the **Join Queue** button there once it's open.${roleNote}`,
       ephemeral: true,
     });
+  }
+
+  // ---------- hightest gamemode picker ----------
+  if (interaction.isStringSelectMenu() && interaction.customId === "hightest_gamemode_select") {
+    const gamemode = interaction.values[0];
+    const gmDisplay = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+      // Require LT3 or better in any gamemode.
+      const LT3_OR_BETTER = ["HT1", "LT1", "HT2", "LT2", "HT3", "LT3"];
+      const { data: tiers } = await supabase
+        .from("player_tiers")
+        .select("tier")
+        .eq("player_id", player.id)
+        .in("tier", LT3_OR_BETTER)
+        .limit(1);
+      if (!tiers || tiers.length === 0) {
+        return interaction.editReply({
+          content: "You need to be **LT3 or better** in at least one gamemode to request a high tier test.",
+          components: [],
+        });
+      }
+
+      const ign = player?.username && !player.username.startsWith("discord-")
+        ? player.username
+        : interaction.member.displayName;
+      const region = player?.region || "N/A";
+      const details = `High tier test request for ${gmDisplay}. IGN: ${ign}, Region: ${region}.`;
+      await createSupportTicketFromDiscord(
+        interaction.user.id,
+        interaction.member?.displayName || interaction.user.username,
+        "hightest",
+        gmDisplay,
+        details
+      );
+      return interaction.editReply({
+        content: `Your high tier test request for **${gmDisplay}** has been submitted — a private channel will appear here shortly.`,
+        components: [],
+      });
+    } catch (err) {
+      console.error("Couldn't create hightest ticket:", err.message);
+      return interaction.editReply({ content: "Something went wrong creating that ticket. Try again or ping staff.", components: [] });
+    }
   }
 
   // ---------- modal submit ----------
@@ -3205,6 +3695,23 @@ client.on("interactionCreate", async (interaction) => {
         region,
         timestamp: Date.now(),
       });
+
+      // Award coins to testee and testers
+      try {
+        const testeePlayer = await ensurePlayerForDiscordUser(testeeId, name);
+        await addCoins(testeePlayer.id, COIN_REWARDS.TESTED);
+        // Milestone bonus
+        if (MILESTONE_TIERS.has(tier)) {
+          await addCoins(testeePlayer.id, COIN_REWARDS.MILESTONE);
+        }
+        for (const tid of testerIds) {
+          const tp = await ensurePlayerForDiscordUser(tid, tid);
+          await addCoins(tp.id, COIN_REWARDS.TESTER);
+        }
+      } catch (e) {
+        console.error("[economy] coin award failed:", e.message);
+      }
+
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
@@ -3338,8 +3845,14 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app) return;
         try {
-          const reviewChannel = await appGuild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch(() => null);
-          if (!reviewChannel) return;
+          const reviewChannel = await appGuild.channels.fetch(MEDIA_APP_REVIEW_CHANNEL_ID).catch((e) => {
+            console.error("[media-app] channel fetch failed:", e.message);
+            return null;
+          });
+          if (!reviewChannel) {
+            console.error("[media-app] review channel not found:", MEDIA_APP_REVIEW_CHANNEL_ID);
+            return;
+          }
           const reviewMsg = await reviewChannel.send({
             embeds: [buildMediaReviewEmbed(app)],
             components: [buildApplicationReviewButtons("media", app.id)],
@@ -3453,6 +3966,189 @@ client.on("messageCreate", async (message) => {
   // Mirror test channel messages (from any non-bot sender) to test_messages
   // so the website chat panel can display them in real time.
   handleTestChannelMessage(message);
+
+  // --- ! prefix economy commands ---
+  if (!message.author.bot && message.content.startsWith("!")) {
+    const args = message.content.slice(1).trim().split(/\s+/);
+    const cmd  = args[0]?.toLowerCase();
+
+    // !coins [user]
+    if (cmd === "coins") {
+      const target = message.mentions.users.first() || message.author;
+      const player = await ensurePlayerForDiscordUser(target.id, target.username);
+      const bal = await getCoins(player.id);
+      return message.reply(`${target.id === message.author.id ? "You have" : `**${target.username}** has`} **${bal} coins** 🪙`);
+    }
+
+    // !daily
+    if (cmd === "daily") {
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const { success, msLeft } = await claimDaily(player.id);
+      if (!success) {
+        const h = Math.floor(msLeft / 3600000);
+        const m = Math.floor((msLeft % 3600000) / 60000);
+        return message.reply(`You already claimed today. Come back in **${h}h ${m}m**.`);
+      }
+      const bal = await getCoins(player.id);
+      return message.reply(`✅ Claimed **${COIN_REWARDS.DAILY} coins** 🪙 — balance: **${bal}**`);
+    }
+
+    // !shop
+    if (cmd === "shop") {
+      const lines = Object.entries(SHOP_ITEMS).map(([, v]) => `**${v.name}** — ${v.price} 🪙\n> ${v.description}`);
+      return message.reply(`**Coin Shop**\n\n${lines.join("\n\n")}\n\nUse \`/shop\` to buy with buttons.`);
+    }
+
+    // !pay <@user> <amount>
+    if (cmd === "pay") {
+      const target = message.mentions.users.first();
+      const amount = parseInt(args[2] || args[1], 10);
+      if (!target || target.bot || isNaN(amount) || amount < 1) {
+        return message.reply("Usage: `!pay @user <amount>`");
+      }
+      if (target.id === message.author.id) return message.reply("You can't pay yourself.");
+      const sender    = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const recipient = await ensurePlayerForDiscordUser(target.id, target.username);
+      const ok = await transferCoins(sender.id, recipient.id, amount);
+      if (!ok) {
+        const bal = await getCoins(sender.id);
+        return message.reply(`Not enough coins. You have **${bal}**, tried to pay **${amount}**.`);
+      }
+      const senderBal = await getCoins(sender.id);
+      return message.reply(`✅ Paid **${amount} coins** 🪙 to ${target}. Your balance: **${senderBal}**`);
+    }
+
+    // !coinflip <heads|tails> <bet>
+    if (cmd === "coinflip" || cmd === "cf") {
+      const choice = args[1]?.toLowerCase();
+      const bet    = parseInt(args[2], 10);
+      if (!["heads","tails"].includes(choice) || isNaN(bet) || bet < 1) {
+        return message.reply("Usage: `!coinflip <heads|tails> <bet>`");
+      }
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const result = Math.random() < 0.5 ? "heads" : "tails";
+      const emoji  = result === "heads" ? "🪙" : "🌑";
+      if (result === choice) {
+        await addCoins(player.id, bet);
+        return message.reply(`${emoji} **${result.charAt(0).toUpperCase()+result.slice(1)}!** Right — **+${bet} coins**! Balance: **${bal + bet}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`${emoji} **${result.charAt(0).toUpperCase()+result.slice(1)}!** Wrong — **-${bet} coins**. Balance: **${bal - bet}**`);
+      }
+    }
+
+    // !dice <under|seven|over> <bet>
+    if (cmd === "dice") {
+      const guess = args[1]?.toLowerCase();
+      const bet   = parseInt(args[2], 10);
+      if (!["under","seven","over"].includes(guess) || isNaN(bet) || bet < 1) {
+        return message.reply("Usage: `!dice <under|seven|over> <bet>`  (under/over = 1x, seven = 4x)");
+      }
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const d1 = Math.floor(Math.random() * 6) + 1;
+      const d2 = Math.floor(Math.random() * 6) + 1;
+      const sum = d1 + d2;
+      const faces = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"];
+      const display = `${faces[d1-1]} + ${faces[d2-1]} = **${sum}**`;
+      const actual  = sum < 7 ? "under" : sum === 7 ? "seven" : "over";
+      const mult    = guess === "seven" ? 4 : 1;
+      if (actual === guess) {
+        const won = bet * mult;
+        await addCoins(player.id, won);
+        return message.reply(`🎲 ${display}\n✅ Correct! **+${won} coins**${mult > 1 ? ` (${mult}x)` : ""}! Balance: **${bal + won}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`🎲 ${display}\n❌ Wrong — **-${bet} coins**. Balance: **${bal - bet}**`);
+      }
+    }
+
+    // !slots <bet>
+    if (cmd === "slots") {
+      const bet = parseInt(args[1], 10);
+      if (isNaN(bet) || bet < 1) return message.reply("Usage: `!slots <bet>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const symbols = ["🍒","🍋","🍊","⭐","💎","7️⃣"];
+      const weights  = [30,  25,  20,  15,  7,   3];
+      function spinSlot() {
+        const total = weights.reduce((a, b) => a + b, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < symbols.length; i++) { r -= weights[i]; if (r <= 0) return i; }
+        return 0;
+      }
+      const s = [spinSlot(), spinSlot(), spinSlot()];
+      const display = `[ ${symbols[s[0]]} | ${symbols[s[1]]} | ${symbols[s[2]]} ]`;
+      let mult = 0;
+      if (s[0] === s[1] && s[1] === s[2]) {
+        mult = s[0] === 5 ? 10 : s[0] === 4 ? 5 : s[0] === 3 ? 3 : 2;
+      }
+      if (mult > 0) {
+        const won = bet * (mult - 1);
+        await addCoins(player.id, won);
+        return message.reply(`🎰 ${display}\n✨ **${mult}x WIN!** +${won} coins! Balance: **${bal + won}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**`);
+      }
+    }
+  }
+    // !leaderboard
+    if (cmd === "leaderboard" || cmd === "lb") {
+      const rows = await getCoinLeaderboard(10);
+      if (!rows.length) return message.reply("No players found.");
+      const medals = ["🥇","🥈","🥉"];
+      const lines = rows.map((r, i) => {
+        const prefix = medals[i] || `**${i + 1}.**`;
+        const name   = r.discord_id ? `<@${r.discord_id}>` : `**${r.username || "Unknown"}**`;
+        return `${prefix} ${name} — **${r.coins} 🪙**`;
+      });
+      return message.reply(`**🏆 Coin Leaderboard**\n\n${lines.join("\n")}`);
+    }
+
+    // !bank  /  !deposit <amount>  /  !withdraw <amount>
+    if (cmd === "bank") {
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const { interest_earned } = await accrueInterest(player.id);
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      const note   = interest_earned > 0 ? `\n> 📈 Interest credited: **+${interest_earned} coins**!` : "";
+      return message.reply(`🏦 **Bank:** **${bank} coins** | 👛 **Wallet:** **${wallet} coins**\n> Rate: ${BANK_DAILY_INTEREST_RATE * 100}% per day${note}`);
+    }
+
+    if (cmd === "deposit") {
+      const amount = parseInt(args[1], 10);
+      if (isNaN(amount) || amount < 1) return message.reply("Usage: `!deposit <amount>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const ok = await bankDeposit(player.id, amount);
+      if (!ok) {
+        const wallet = await getCoins(player.id);
+        return message.reply(`Not enough coins. Wallet: **${wallet}**, tried: **${amount}**.`);
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return message.reply(`✅ Deposited **${amount} coins**. 🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**`);
+    }
+
+    if (cmd === "withdraw") {
+      const amount = parseInt(args[1], 10);
+      if (isNaN(amount) || amount < 1) return message.reply("Usage: `!withdraw <amount>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const ok = await bankWithdraw(player.id, amount);
+      if (!ok) {
+        const bank = await getBankBalance(player.id);
+        return message.reply(`Not enough in bank. Bank: **${bank}**, tried: **${amount}**.`);
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return message.reply(`✅ Withdrew **${amount} coins**. 🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**`);
+    }
+  }
+  // --- end prefix commands ---
 
   // Sticky "Testing Punishments" message in #punishments channel.
   // Whenever anyone (including the bot's own sticky repost) sends a message,

@@ -95,9 +95,17 @@ async function assignTierRole(guild, playerId, gamemode, tier) {
 
 // ---------- support tickets ----------
 
-async function getOrCreateSupportCategory(guild) {
+const TICKET_CATEGORY_NAMES = {
+  report:   "Report Tickets",
+  appeal:   "Appeal Tickets",
+  hightest: "High Tier Tickets",
+  help:     SUPPORT_CATEGORY_NAME,
+};
+
+async function getOrCreateTicketCategory(guild, ticketType) {
+  const categoryName = TICKET_CATEGORY_NAMES[ticketType] || SUPPORT_CATEGORY_NAME;
   let category = guild.channels.cache.find(
-    (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === SUPPORT_CATEGORY_NAME.toLowerCase()
+    (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
   );
   if (!category) {
     const overwrites = [{ id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] }];
@@ -110,7 +118,7 @@ async function getOrCreateSupportCategory(guild) {
       }
     }
     category = await guild.channels.create({
-      name: SUPPORT_CATEGORY_NAME,
+      name: categoryName,
       type: ChannelType.GuildCategory,
       permissionOverwrites: overwrites,
     });
@@ -148,8 +156,18 @@ async function createTicketChannel(guild, ticket) {
       .eq("id", ticket.player_id)
       .maybeSingle();
 
-    const category = await getOrCreateSupportCategory(guild);
-    const channelName = `${sanitizeChannelName(player?.username)}-ticket`;
+    const category = await getOrCreateTicketCategory(guild, ticket.category);
+    let suffix;
+    if (ticket.category === "report") {
+      suffix = "report";
+    } else if (ticket.category === "appeal") {
+      suffix = "appeal";
+    } else if (ticket.category === "hightest") {
+      suffix = `hightest-${sanitizeChannelName(ticket.subject)}`;
+    } else {
+      suffix = "ticket";
+    }
+    const channelName = `${sanitizeChannelName(player?.username)}-${suffix}`;
     const channel = await guild.channels.create({
       name: channelName,
       type: ChannelType.GuildText,

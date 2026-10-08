@@ -195,6 +195,31 @@ function queueCategoryName(gamemode) {
   return `${display} Test`;
 }
 
+// Economy config
+const COIN_REWARDS = {
+  TESTED:    50,   // testee earns this when a result is submitted for them
+  TESTER:    30,   // tester earns this per completed test
+  DAILY:    100,   // /daily claim
+  MILESTONE: 200,  // bonus on reaching a new tier milestone (HT3, LT3, HT1, LT1)
+};
+
+const MILESTONE_TIERS = new Set(["HT3", "LT3", "HT2", "LT2", "HT1", "LT1"]);
+
+const SHOP_ITEMS = {
+  cooldown_remove: { name: "Cooldown Removal",  price: 500,  description: "Remove your active tier-test cooldown for one gamemode." },
+  extra_slot:      { name: "Extra Queue Slot",   price: 800,  description: "Buy one extra queue slot (max 2 extra)." },
+  vip_role:        { name: "VIP Role",           price: 1500, description: "Get the exclusive VIP cosmetic role." },
+};
+
+// How many coins cheaper it is to gift an item vs buying it for yourself.
+const GIFT_DISCOUNT = 500;
+
+// Bank: daily interest rate applied to deposited balance (2% per day).
+const BANK_DAILY_INTEREST_RATE = 0.02;
+
+// Set this to a real role ID to enable the VIP role shop item.
+const VIP_ROLE_ID = process.env.VIP_ROLE_ID || "";
+
 module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
@@ -226,4 +251,10 @@ module.exports = {
   parseChannelName,
   gamemodeForChannelName,
   regionForChannelName,
+  COIN_REWARDS,
+  MILESTONE_TIERS,
+  SHOP_ITEMS,
+  GIFT_DISCOUNT,
+  BANK_DAILY_INTEREST_RATE,
+  VIP_ROLE_ID,
 };

@@ -661,6 +661,139 @@ async function decideMediaApplication(applicationId, status, reviewerDiscordId) 
   return !!data;
 }
 
+// ---------- economy ----------
+
+async function getCoins(playerId) {
+  const { data } = await supabase.from("players").select("coins").eq("id", playerId).single();
+  return data ? data.coins : 0;
+}
+
+async function addCoins(playerId, amount) {
+  await supabase.rpc("increment_coins", { player_id: playerId, amount });
+}
+
+async function spendCoins(playerId, amount) {
+  const current = await getCoins(playerId);
+  if (current < amount) return false;
+  const { error } = await supabase
+    .from("players")
+    .update({ coins: current - amount })
+    .eq("id", playerId)
+    .gte("coins", amount);
+  return !error;
+}
+
+async function claimDaily(playerId) {
+  const { data } = await supabase.from("players").select("daily_claimed_at").eq("id", playerId).single();
+  const lastClaim = data?.daily_claimed_at ? new Date(data.daily_claimed_at) : null;
+  const now = new Date();
+  if (lastClaim) {
+    const msSince = now - lastClaim;
+    if (msSince < 20 * 60 * 60 * 1000) {
+      const msLeft = 20 * 60 * 60 * 1000 - msSince;
+      return { success: false, msLeft };
+    }
+  }
+  await supabase.from("players").update({ daily_claimed_at: now.toISOString() }).eq("id", playerId);
+  await addCoins(playerId, require("./config").COIN_REWARDS.DAILY);
+  return { success: true };
+}
+
+async function getExtraQueueSlots(playerId) {
+  const { data } = await supabase.from("players").select("extra_queue_slots").eq("id", playerId).single();
+  return data ? data.extra_queue_slots : 0;
+}
+
+async function addExtraQueueSlot(playerId) {
+  const current = await getExtraQueueSlots(playerId);
+  if (current >= 2) return false;
+  await supabase.from("players").update({ extra_queue_slots: current + 1 }).eq("id", playerId);
+  return true;
+}
+
+async function hasVipRole(playerId) {
+  const { data } = await supabase.from("players").select("vip_role_purchased").eq("id", playerId).single();
+  return data ? !!data.vip_role_purchased : false;
+}
+
+async function setVipRolePurchased(playerId) {
+  await supabase.from("players").update({ vip_role_purchased: true }).eq("id", playerId);
+}
+
+// Transfer coins from one player to another atomically (spend then add).
+// Returns false if the sender doesn't have enough.
+async function transferCoins(fromId, toId, amount) {
+  const ok = await spendCoins(fromId, amount);
+  if (!ok) return false;
+  await addCoins(toId, amount);
+  return true;
+}
+
+// ---------- bank ----------
+
+const BANK_DAILY_RATE = require("./config").BANK_DAILY_INTEREST_RATE;
+
+// Accrues interest since last_interest_at and returns { bank_balance, interest_earned }.
+async function accrueInterest(playerId) {
+  const { data } = await supabase
+    .from("players")
+    .select("bank_balance, bank_last_interest_at")
+    .eq("id", playerId)
+    .single();
+  if (!data || !data.bank_balance) return { bank_balance: data?.bank_balance || 0, interest_earned: 0 };
+
+  const now = new Date();
+  const last = data.bank_last_interest_at ? new Date(data.bank_last_interest_at) : now;
+  const daysSince = (now - last) / (1000 * 60 * 60 * 24);
+  if (daysSince < 1) return { bank_balance: data.bank_balance, interest_earned: 0 };
+
+  const interest = Math.floor(data.bank_balance * BANK_DAILY_RATE * Math.floor(daysSince));
+  if (interest <= 0) return { bank_balance: data.bank_balance, interest_earned: 0 };
+
+  const newBalance = data.bank_balance + interest;
+  await supabase.from("players").update({ bank_balance: newBalance, bank_last_interest_at: now.toISOString() }).eq("id", playerId);
+  return { bank_balance: newBalance, interest_earned: interest };
+}
+
+async function getBankBalance(playerId) {
+  const { data } = await supabase.from("players").select("bank_balance").eq("id", playerId).single();
+  return data?.bank_balance || 0;
+}
+
+// Deposit coins from wallet into bank. Returns false if insufficient wallet funds.
+async function bankDeposit(playerId, amount) {
+  const ok = await spendCoins(playerId, amount);
+  if (!ok) return false;
+  const { data } = await supabase.from("players").select("bank_balance, bank_last_interest_at").eq("id", playerId).single();
+  const newBalance = (data?.bank_balance || 0) + amount;
+  const now = new Date().toISOString();
+  await supabase.from("players").update({
+    bank_balance: newBalance,
+    bank_last_interest_at: data?.bank_last_interest_at || now,
+  }).eq("id", playerId);
+  return true;
+}
+
+// Withdraw coins from bank to wallet. Returns false if insufficient bank funds.
+async function bankWithdraw(playerId, amount) {
+  const { data } = await supabase.from("players").select("bank_balance").eq("id", playerId).single();
+  const bal = data?.bank_balance || 0;
+  if (bal < amount) return false;
+  await supabase.from("players").update({ bank_balance: bal - amount }).eq("id", playerId);
+  await addCoins(playerId, amount);
+  return true;
+}
+
+// Top N players by coin balance for the leaderboard.
+async function getCoinLeaderboard(limit = 10) {
+  const { data } = await supabase
+    .from("players")
+    .select("username, discord_id, coins")
+    .order("coins", { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -713,4 +846,18 @@ module.exports = {
   getMediaApplication,
   setMediaApplicationReviewMessage,
   decideMediaApplication,
+  getCoins,
+  addCoins,
+  spendCoins,
+  claimDaily,
+  getExtraQueueSlots,
+  addExtraQueueSlot,
+  hasVipRole,
+  setVipRolePurchased,
+  transferCoins,
+  accrueInterest,
+  getBankBalance,
+  bankDeposit,
+  bankWithdraw,
+  getCoinLeaderboard,
 };
