@@ -113,6 +113,25 @@ const commands = [
     .addUserOption((opt) =>
       opt.setName("tester").setDescription("The tester to remove").setRequired(true)
     ),
+
+  new SlashCommandBuilder()
+    .setName("announce")
+    .setDescription("Post an announcement to #announcements and the website. (Managers/owners only)")
+    .addStringOption((opt) =>
+      opt.setName("title").setDescription("Announcement headline").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("body").setDescription("Announcement body text").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt.setName("tag").setDescription("Category tag").setRequired(true)
+        .addChoices(
+          { name: "Launch",  value: "Launch"  },
+          { name: "Feature", value: "Feature" },
+          { name: "Update",  value: "Update"  },
+          { name: "Fix",     value: "Fix"     },
+        )
+    ),
 ];
 
 module.exports = commands;

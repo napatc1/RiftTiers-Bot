@@ -1919,6 +1919,52 @@ client.on("interactionCreate", async (interaction) => {
   }
 
 
+  // /announce
+  if (interaction.isChatInputCommand() && interaction.commandName === "announce") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers and owners can post announcements.", ephemeral: true });
+    }
+
+    const title = interaction.options.getString("title");
+    const body  = interaction.options.getString("body");
+    const tag   = interaction.options.getString("tag");
+
+    await interaction.deferReply({ ephemeral: true });
+
+    // Save to Supabase so the website shows it
+    const { error: dbErr } = await supabase
+      .from("announcements")
+      .insert({ title, body, tag });
+    if (dbErr) {
+      console.error("[announce] supabase insert failed:", dbErr.message);
+      return interaction.editReply({ content: `Failed to save announcement: ${dbErr.message}` });
+    }
+
+    // Post to #announcements channel
+    const TAG_COLORS = { Launch: 0x4ade80, Feature: 0x3fa0f5, Update: 0xffd54a, Fix: 0xf87171 };
+    const announcementsChannel = interaction.guild.channels.cache.find(
+      (c) => c.type === ChannelType.GuildText && c.name === "announcements"
+    );
+    if (announcementsChannel) {
+      await announcementsChannel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle(title)
+            .setDescription(body)
+            .addFields({ name: "Tag", value: tag, inline: true })
+            .setColor(TAG_COLORS[tag] || 0x3fa0f5)
+            .setTimestamp()
+            .setFooter({ text: `Posted by ${interaction.member.displayName}` }),
+        ],
+      });
+    }
+
+    return interaction.editReply({
+      content: `✅ Announcement posted${announcementsChannel ? ` to <#${announcementsChannel.id}>` : ""} and saved to the website.`,
+    });
+  }
+
   // /backfilllogs
   if (interaction.isChatInputCommand() && interaction.commandName === "backfilllogs") {
     if (!canManageCooldowns(interaction.member)) {
