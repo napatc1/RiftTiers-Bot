@@ -214,6 +214,9 @@ const SHOP_ITEMS = {
 // How many coins cheaper it is to gift an item vs buying it for yourself.
 const GIFT_DISCOUNT = 500;
 
+// Bank: daily interest rate applied to deposited balance (2% per day).
+const BANK_DAILY_INTEREST_RATE = 0.02;
+
 // Set this to a real role ID to enable the VIP role shop item.
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID || "";
 
@@ -252,5 +255,6 @@ module.exports = {
   MILESTONE_TIERS,
   SHOP_ITEMS,
   GIFT_DISCOUNT,
+  BANK_DAILY_INTEREST_RATE,
   VIP_ROLE_ID,
 };

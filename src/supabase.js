@@ -729,6 +729,71 @@ async function transferCoins(fromId, toId, amount) {
   return true;
 }
 
+// ---------- bank ----------
+
+const BANK_DAILY_RATE = require("./config").BANK_DAILY_INTEREST_RATE;
+
+// Accrues interest since last_interest_at and returns { bank_balance, interest_earned }.
+async function accrueInterest(playerId) {
+  const { data } = await supabase
+    .from("players")
+    .select("bank_balance, bank_last_interest_at")
+    .eq("id", playerId)
+    .single();
+  if (!data || !data.bank_balance) return { bank_balance: data?.bank_balance || 0, interest_earned: 0 };
+
+  const now = new Date();
+  const last = data.bank_last_interest_at ? new Date(data.bank_last_interest_at) : now;
+  const daysSince = (now - last) / (1000 * 60 * 60 * 24);
+  if (daysSince < 1) return { bank_balance: data.bank_balance, interest_earned: 0 };
+
+  const interest = Math.floor(data.bank_balance * BANK_DAILY_RATE * Math.floor(daysSince));
+  if (interest <= 0) return { bank_balance: data.bank_balance, interest_earned: 0 };
+
+  const newBalance = data.bank_balance + interest;
+  await supabase.from("players").update({ bank_balance: newBalance, bank_last_interest_at: now.toISOString() }).eq("id", playerId);
+  return { bank_balance: newBalance, interest_earned: interest };
+}
+
+async function getBankBalance(playerId) {
+  const { data } = await supabase.from("players").select("bank_balance").eq("id", playerId).single();
+  return data?.bank_balance || 0;
+}
+
+// Deposit coins from wallet into bank. Returns false if insufficient wallet funds.
+async function bankDeposit(playerId, amount) {
+  const ok = await spendCoins(playerId, amount);
+  if (!ok) return false;
+  const { data } = await supabase.from("players").select("bank_balance, bank_last_interest_at").eq("id", playerId).single();
+  const newBalance = (data?.bank_balance || 0) + amount;
+  const now = new Date().toISOString();
+  await supabase.from("players").update({
+    bank_balance: newBalance,
+    bank_last_interest_at: data?.bank_last_interest_at || now,
+  }).eq("id", playerId);
+  return true;
+}
+
+// Withdraw coins from bank to wallet. Returns false if insufficient bank funds.
+async function bankWithdraw(playerId, amount) {
+  const { data } = await supabase.from("players").select("bank_balance").eq("id", playerId).single();
+  const bal = data?.bank_balance || 0;
+  if (bal < amount) return false;
+  await supabase.from("players").update({ bank_balance: bal - amount }).eq("id", playerId);
+  await addCoins(playerId, amount);
+  return true;
+}
+
+// Top N players by coin balance for the leaderboard.
+async function getCoinLeaderboard(limit = 10) {
+  const { data } = await supabase
+    .from("players")
+    .select("username, discord_id, coins")
+    .order("coins", { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -790,4 +855,9 @@ module.exports = {
   hasVipRole,
   setVipRolePurchased,
   transferCoins,
+  accrueInterest,
+  getBankBalance,
+  bankDeposit,
+  bankWithdraw,
+  getCoinLeaderboard,
 };

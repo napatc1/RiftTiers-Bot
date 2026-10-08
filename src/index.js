@@ -53,6 +53,7 @@ const {
   MILESTONE_TIERS,
   SHOP_ITEMS,
   GIFT_DISCOUNT,
+  BANK_DAILY_INTEREST_RATE,
   VIP_ROLE_ID,
 } = require("./config");
 const {
@@ -114,6 +115,11 @@ const {
   hasVipRole,
   setVipRolePurchased,
   transferCoins,
+  accrueInterest,
+  getBankBalance,
+  bankDeposit,
+  bankWithdraw,
+  getCoinLeaderboard,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -1980,6 +1986,69 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({
       content: `✅ Sync complete.\n• **${granted}** members granted Verified role\n• **${skipped}** already had it\n• **${notInServer}** not in server`,
     });
+  }
+
+  // /leaderboard — top 10 by coins
+  if (interaction.isChatInputCommand() && interaction.commandName === "leaderboard") {
+    await interaction.deferReply();
+    const rows = await getCoinLeaderboard(10);
+    if (!rows.length) return interaction.editReply({ content: "No players found." });
+    const medals = ["🥇","🥈","🥉"];
+    const lines = rows.map((r, i) => {
+      const prefix = medals[i] || `**${i + 1}.**`;
+      const name   = r.discord_id ? `<@${r.discord_id}>` : `**${r.username || "Unknown"}**`;
+      return `${prefix} ${name} — **${r.coins} 🪙**`;
+    });
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 Coin Leaderboard")
+      .setColor(0xf5a623)
+      .setDescription(lines.join("\n"))
+      .setFooter({ text: "Top 10 players by wallet balance" });
+    return interaction.editReply({ embeds: [embed] });
+  }
+
+  // /bank — deposit, withdraw, balance (earns 2% daily interest)
+  if (interaction.isChatInputCommand() && interaction.commandName === "bank") {
+    const action = interaction.options.getString("action");
+    const amount = interaction.options.getInteger("amount");
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+    // Always accrue interest first
+    const { interest_earned } = await accrueInterest(player.id);
+    const interestNote = interest_earned > 0 ? `\n> 📈 Interest credited: **+${interest_earned} coins**!` : "";
+
+    if (action === "balance") {
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({
+        content: `🏦 **Bank Balance:** **${bank} coins**\n👛 **Wallet:** **${wallet} coins**\n> Interest rate: ${BANK_DAILY_INTEREST_RATE * 100}% per day${interestNote}`,
+      });
+    }
+
+    if (action === "deposit") {
+      if (!amount) return interaction.editReply({ content: "Specify an amount: `/bank action:deposit amount:500`" });
+      const ok = await bankDeposit(player.id, amount);
+      if (!ok) {
+        const wallet = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins in wallet. You have **${wallet}**, tried to deposit **${amount}**.${interestNote}` });
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({ content: `✅ Deposited **${amount} coins** into the bank.\n🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**${interestNote}` });
+    }
+
+    if (action === "withdraw") {
+      if (!amount) return interaction.editReply({ content: "Specify an amount: `/bank action:withdraw amount:500`" });
+      const ok = await bankWithdraw(player.id, amount);
+      if (!ok) {
+        const bank = await getBankBalance(player.id);
+        return interaction.editReply({ content: `Not enough coins in bank. You have **${bank}**, tried to withdraw **${amount}**.${interestNote}` });
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return interaction.editReply({ content: `✅ Withdrew **${amount} coins** from the bank.\n🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**${interestNote}` });
+    }
   }
 
   // /coins — check coin balance
@@ -3980,6 +4049,57 @@ client.on("messageCreate", async (message) => {
         await spendCoins(player.id, bet);
         return message.reply(`🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**`);
       }
+    }
+  }
+    // !leaderboard
+    if (cmd === "leaderboard" || cmd === "lb") {
+      const rows = await getCoinLeaderboard(10);
+      if (!rows.length) return message.reply("No players found.");
+      const medals = ["🥇","🥈","🥉"];
+      const lines = rows.map((r, i) => {
+        const prefix = medals[i] || `**${i + 1}.**`;
+        const name   = r.discord_id ? `<@${r.discord_id}>` : `**${r.username || "Unknown"}**`;
+        return `${prefix} ${name} — **${r.coins} 🪙**`;
+      });
+      return message.reply(`**🏆 Coin Leaderboard**\n\n${lines.join("\n")}`);
+    }
+
+    // !bank  /  !deposit <amount>  /  !withdraw <amount>
+    if (cmd === "bank") {
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const { interest_earned } = await accrueInterest(player.id);
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      const note   = interest_earned > 0 ? `\n> 📈 Interest credited: **+${interest_earned} coins**!` : "";
+      return message.reply(`🏦 **Bank:** **${bank} coins** | 👛 **Wallet:** **${wallet} coins**\n> Rate: ${BANK_DAILY_INTEREST_RATE * 100}% per day${note}`);
+    }
+
+    if (cmd === "deposit") {
+      const amount = parseInt(args[1], 10);
+      if (isNaN(amount) || amount < 1) return message.reply("Usage: `!deposit <amount>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const ok = await bankDeposit(player.id, amount);
+      if (!ok) {
+        const wallet = await getCoins(player.id);
+        return message.reply(`Not enough coins. Wallet: **${wallet}**, tried: **${amount}**.`);
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return message.reply(`✅ Deposited **${amount} coins**. 🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**`);
+    }
+
+    if (cmd === "withdraw") {
+      const amount = parseInt(args[1], 10);
+      if (isNaN(amount) || amount < 1) return message.reply("Usage: `!withdraw <amount>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const ok = await bankWithdraw(player.id, amount);
+      if (!ok) {
+        const bank = await getBankBalance(player.id);
+        return message.reply(`Not enough in bank. Bank: **${bank}**, tried: **${amount}**.`);
+      }
+      const wallet = await getCoins(player.id);
+      const bank   = await getBankBalance(player.id);
+      return message.reply(`✅ Withdrew **${amount} coins**. 🏦 Bank: **${bank}** | 👛 Wallet: **${wallet}**`);
     }
   }
   // --- end prefix commands ---

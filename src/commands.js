@@ -151,6 +151,28 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("leaderboard")
+    .setDescription("Show the top 10 players by coin balance."),
+
+  new SlashCommandBuilder()
+    .setName("bank")
+    .setDescription("Deposit, withdraw, or check your bank balance (earns 2% daily interest).")
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("What to do")
+        .setRequired(true)
+        .addChoices(
+          { name: "balance",  value: "balance"  },
+          { name: "deposit",  value: "deposit"  },
+          { name: "withdraw", value: "withdraw" },
+        )
+    )
+    .addIntegerOption((opt) =>
+      opt.setName("amount").setDescription("Amount (for deposit/withdraw)").setRequired(false).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
     .setName("gift")
     .setDescription("Gift a shop item to another player (500 coins cheaper than buying for yourself).")
     .addStringOption((opt) =>
