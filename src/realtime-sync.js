@@ -7,7 +7,7 @@
 // website.
 const { EmbedBuilder, ChannelType, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
 const { supabase, ensurePlayerForDiscordUser } = require("./supabase");
-const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, tierRoleName, queueCategoryName } = require("./config");
+const { GAMEMODE_PING_ROLE_NAMES, PERMISSION_ROLE_IDS, SUPPORT_CATEGORY_NAME, REGION_ROLE_NAMES, tierRoleName, queueCategoryName } = require("./config");
 
 const VERIFIED_ROLE_ID = "1556203882529558539";
 
@@ -51,6 +51,41 @@ async function grantVerifiedRole(guild, discordId) {
     }
   } catch (err) {
     console.error("[realtime-sync] grantVerifiedRole failed:", err.message);
+  }
+}
+
+// ---------- region roles ----------
+
+// Grants the appropriate region role (e.g. 🇨🇳 Asia) when a player verifies.
+// Role names are configured in REGION_ROLE_NAMES; if the role doesn't exist
+// yet on the server it is created automatically.
+async function grantRegionRole(guild, discordId, region) {
+  if (!discordId || !region) return;
+  const roleName = REGION_ROLE_NAMES[region];
+  if (!roleName) return;
+  try {
+    const member = await guild.members.fetch(discordId).catch(() => null);
+    if (!member) return;
+
+    // Remove any other region roles the member might have
+    const allRegionNames = new Set(Object.values(REGION_ROLE_NAMES));
+    const toRemove = member.roles.cache.filter(
+      (r) => allRegionNames.has(r.name) && r.name !== roleName
+    );
+    for (const r of toRemove.values()) {
+      await member.roles.remove(r).catch(() => {});
+    }
+
+    let role = guild.roles.cache.find((r) => r.name === roleName);
+    if (!role) {
+      role = await guild.roles.create({ name: roleName, mentionable: false }).catch(() => null);
+    }
+    if (role && !member.roles.cache.has(role.id)) {
+      await member.roles.add(role).catch(() => {});
+      console.log(`[realtime-sync] granted ${roleName} to ${discordId}`);
+    }
+  } catch (err) {
+    console.error("[realtime-sync] grantRegionRole failed:", err.message);
   }
 }
 
@@ -519,17 +554,26 @@ async function initRealtimeSync(guild, { onQueueStateChange, onActiveTestSet } =
     })
     .subscribe();
 
-  // Grant the Verified role whenever a player row is created or updated with
-  // a discord_id (i.e. when they link their account on the website).
+  // Grant the Verified role and region role whenever a player row is created
+  // or updated with a discord_id (i.e. when they link their account on the website).
   supabase
     .channel("bot-players-verified")
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "players" }, (payload) => {
-      if (payload.new?.discord_id) grantVerifiedRole(guild, payload.new.discord_id);
+      const { discord_id, region } = payload.new || {};
+      if (discord_id) {
+        grantVerifiedRole(guild, discord_id);
+        grantRegionRole(guild, discord_id, region);
+      }
     })
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "players" }, (payload) => {
-      // Only fire when discord_id was just set (wasn't set before, now is).
-      if (payload.new?.discord_id && !payload.old?.discord_id) {
-        grantVerifiedRole(guild, payload.new.discord_id);
+      const { discord_id, region } = payload.new || {};
+      // Grant verified role when discord_id is newly set
+      if (discord_id && !payload.old?.discord_id) {
+        grantVerifiedRole(guild, discord_id);
+      }
+      // Grant region role when region is newly set or changed
+      if (discord_id && region && region !== payload.old?.region) {
+        grantRegionRole(guild, discord_id, region);
       }
     })
     .subscribe();

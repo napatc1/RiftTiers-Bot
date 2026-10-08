@@ -94,6 +94,17 @@ const GAMEMODE_PING_ROLE_NAMES = {
   cart: "Cart",
 };
 
+// Discord role names for each region — assigned automatically when a player
+// verifies on the website. Matched by name so they can be renamed in Discord
+// without touching the bot (just update these strings to match).
+const REGION_ROLE_NAMES = {
+  NA: "🇺🇸 NA",
+  EU: "🇪🇺 EU",
+  AS: "🇨🇳 Asia",
+  ME: "🌙 ME",
+  AU: "🇦🇺 AU",
+};
+
 // Discord role IDs that grant website permissions. Kept separate from the
 // gamemode ping roles above. The bot syncs these onto each player's
 // `profiles` row in Supabase so the website knows who can do what.
@@ -224,6 +235,7 @@ module.exports = {
   GAMEMODE_CHANNELS,
   GAMEMODES,
   REGIONS,
+  REGION_ROLE_NAMES,
   RESTRICTED_ROLE_ID,
   GAMEMODE_EMOJIS,
   GAMEMODE_PING_ROLE_NAMES,

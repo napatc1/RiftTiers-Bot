@@ -1988,6 +1988,114 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /util posthowithworks — posts a "How It Works" guide to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthowithworks") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("📖 How RyftTiers Works")
+      .setColor(0x2f7fd6)
+      .setDescription(
+        "RyftTiers is a **skill-based Minecraft PvP tier list** — your rank is earned through real fights, not self-reported.\n\n" +
+        "**① Verify your account**\nHead to [ryfttiers.pages.dev](https://ryfttiers.pages.dev) → click **Login** → Discord OAuth → set your IGN & region.\n\n" +
+        "**② Request a test**\nGo to your region's test channel and hit **Request Test**. Pick your gamemode (Crystal, Sword, Axe, etc.) and you'll be added to the queue.\n\n" +
+        "**③ Fight a tester**\nWhen a tester is ready you'll be DM'd. Log on, fight the evaluation rounds, and let the tester do their job — no coaching mid-test.\n\n" +
+        "**④ Get your tier**\nOnce the test ends your tier is posted in #results and updated live on the website. Tiers go from **LT5** (entry) up to **HT1** (top). Disagree with the result? Open a support ticket.\n\n" +
+        "**⑤ Queue again**\nThere's a cooldown between tests (by default 3 days). Use the shop on the website to remove a cooldown early.\n\n" +
+        "━━━━━━━━━━━━━━━━━━━━\n" +
+        "-# 🌐 ryfttiers.pages.dev  •  ⚔️ Earn your tier fairly"
+      );
+    await interaction.channel.send({ embeds: [embed] });
+    return interaction.editReply({ content: "How It Works posted!" });
+  }
+
+  // /util posttierlistwebsite — posts a website link card to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posttierlistwebsite") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("🏆 RyftTiers — Tier List Website")
+      .setColor(0x3fa0f5)
+      .setDescription(
+        "The official RyftTiers website — live leaderboards, player profiles, test history, and more.\n\n" +
+        "🌐 **[ryfttiers.pages.dev](https://ryfttiers.pages.dev)**\n\n" +
+        "• Browse rankings by gamemode or region\n" +
+        "• View any player's tier history\n" +
+        "• Request a tier test directly from the site\n" +
+        "• Verify your account and link your Discord\n" +
+        "• Check the Testers tab to see who's active"
+      );
+    await interaction.channel.send({ embeds: [embed] });
+    return interaction.editReply({ content: "Tier list website card posted!" });
+  }
+
+  // /util postserverboosts — posts server boost info to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postserverboosts") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("🚀 Server Boosts")
+      .setColor(0xff73fa)
+      .setDescription(
+        "Boosting RyftTiers helps the server grow and unlock better features for everyone!\n\n" +
+        "**Current Boost Perks:**\n" +
+        "• 💜 Exclusive **Booster** role\n" +
+        "• 🎨 Access to the **#booster-perks** channel\n" +
+        "• 🌟 Special recognition in the **#booster-wall**\n" +
+        "• 🪙 Bonus coins on the website economy\n\n" +
+        "Click the boost button on the server banner or use `/boost` to support us!"
+      );
+    await interaction.channel.send({ embeds: [embed] });
+    return interaction.editReply({ content: "Server boosts info posted!" });
+  }
+
+  // /util postboosterperks — posts booster perks info to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postboosterperks") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("💜 Booster Perks")
+      .setColor(0xff73fa)
+      .setDescription(
+        "Thank you for boosting RyftTiers! Here's what you get:\n\n" +
+        "**Exclusive Perks:**\n" +
+        "• 🎨 Custom color role of your choice\n" +
+        "• 🌟 Your name on the **#booster-wall**\n" +
+        "• 🪙 **500 bonus coins** added to your website wallet\n" +
+        "• 💜 Access to this exclusive booster channel\n" +
+        "• 🔔 Early access to announcements\n\n" +
+        "To claim your color role or coins, open a **support ticket** and let staff know you've boosted."
+      );
+    await interaction.channel.send({ embeds: [embed] });
+    return interaction.editReply({ content: "Booster perks posted!" });
+  }
+
+  // /util postboosterwall — posts the booster wall header to the current channel
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postboosterwall") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle("🌟 Booster Wall")
+      .setColor(0xff73fa)
+      .setDescription(
+        "A huge thank you to everyone who has boosted the server!\n\n" +
+        "Your support keeps RyftTiers running and growing. Every boost is genuinely appreciated — you're the reason we can offer better features and a stronger community.\n\n" +
+        "💜 **You're a legend.**"
+      );
+    await interaction.channel.send({ embeds: [embed] });
+    return interaction.editReply({ content: "Booster wall header posted!" });
+  }
+
   // /leaderboard — top 10 by coins
   if (interaction.isChatInputCommand() && interaction.commandName === "leaderboard") {
     await interaction.deferReply();
