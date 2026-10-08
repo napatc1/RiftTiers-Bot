@@ -19,9 +19,10 @@ const commands = [
           { name: "posthighrubric",    value: "posthighrubric" },
           { name: "postmediaapp",      value: "postmediaapp" },
           { name: "posthightestpanel", value: "posthightestpanel" },
-          { name: "setupqueues",       value: "setupqueues" },
-          { name: "resetqueues",       value: "resetqueues" },
-          { name: "removetester",      value: "removetester" }
+          { name: "setupqueues",         value: "setupqueues" },
+          { name: "resetqueues",         value: "resetqueues" },
+          { name: "removetester",        value: "removetester" },
+          { name: "syncverifiedroles",   value: "syncverifiedroles" }
         )
     )
     .addUserOption((opt) =>

@@ -1943,6 +1943,44 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /util syncverifiedroles — bulk-grant the Verified role to everyone already in players
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "syncverifiedroles") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers/owners can run this.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const VERIFIED_ROLE_ID = "1556203882529558539";
+    const verifiedRole = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
+    if (!verifiedRole) {
+      return interaction.editReply({ content: `Verified role (ID \`${VERIFIED_ROLE_ID}\`) not found on this server.` });
+    }
+
+    // Fetch all player rows that have a discord_id
+    const { supabase: sb } = require("./supabase");
+    const { data: players, error } = await sb
+      .from("players")
+      .select("discord_id")
+      .not("discord_id", "is", null);
+
+    if (error) return interaction.editReply({ content: `Supabase error: ${error.message}` });
+    if (!players || players.length === 0) return interaction.editReply({ content: "No verified players found in the database." });
+
+    let granted = 0, skipped = 0, notInServer = 0;
+    for (const row of players) {
+      const member = await interaction.guild.members.fetch(row.discord_id).catch(() => null);
+      if (!member) { notInServer++; continue; }
+      if (member.roles.cache.has(VERIFIED_ROLE_ID)) { skipped++; continue; }
+      await member.roles.add(verifiedRole).catch(() => {});
+      granted++;
+    }
+
+    return interaction.editReply({
+      content: `✅ Sync complete.\n• **${granted}** members granted Verified role\n• **${skipped}** already had it\n• **${notInServer}** not in server`,
+    });
+  }
+
   // /coins — check coin balance
   if (interaction.isChatInputCommand() && interaction.commandName === "coins") {
     await interaction.deferReply({ ephemeral: true });
