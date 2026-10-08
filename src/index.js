@@ -1973,33 +1973,40 @@ client.on("interactionCreate", async (interaction) => {
 
   // /shop — view shop
   if (interaction.isChatInputCommand() && interaction.commandName === "shop") {
-    const lines = Object.entries(SHOP_ITEMS).map(([k, v]) => `**${v.name}** — ${v.price} coins\n> ${v.description}`);
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    const lines = Object.entries(SHOP_ITEMS).map(([, v]) => `**${v.name}** — ${v.price} coins\n> ${v.description}`);
     const embed = new EmbedBuilder()
       .setTitle("Coin Shop 🪙")
       .setDescription(lines.join("\n\n"))
+      .setFooter({ text: `Your balance: ${bal} coins` })
       .setColor(0xf5c842);
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("shop_buy_cooldown_remove").setLabel("Cooldown Removal — 500 🪙").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("shop_buy_extra_slot").setLabel("Extra Queue Slot — 800 🪙").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("shop_buy_vip_role").setLabel("VIP Role — 1500 🪙").setStyle(ButtonStyle.Success),
+    );
+    return interaction.reply({ embeds: [embed], components: [row1], ephemeral: true });
   }
 
-  // /buy — purchase shop item
-  if (interaction.isChatInputCommand() && interaction.commandName === "buy") {
-    await interaction.deferReply({ ephemeral: true });
-    const itemKey  = interaction.options.getString("item");
-    const gamemode = interaction.options.getString("gamemode");
+  // Shop buy buttons
+  if (interaction.isButton() && interaction.customId.startsWith("shop_buy_")) {
+    const itemKey = interaction.customId.replace("shop_buy_", "");
     const item = SHOP_ITEMS[itemKey];
-    if (!item) return interaction.editReply({ content: "Unknown item." });
+    if (!item) return interaction.reply({ content: "Unknown item.", ephemeral: true });
 
+    await interaction.deferReply({ ephemeral: true });
     const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
 
     if (itemKey === "cooldown_remove") {
-      if (!gamemode) return interaction.editReply({ content: "Specify the `gamemode` option for cooldown removal." });
-      const ok = await spendCoins(player.id, item.price);
-      if (!ok) {
-        const bal = await getCoins(player.id);
-        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
-      }
-      await clearCooldown(gamemode, interaction.user.id);
-      return interaction.editReply({ content: `✅ Cooldown removed for **${gamemode}**! (-${item.price} coins)` });
+      // Show gamemode selector
+      const row = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("shop_cooldown_gamemode")
+          .setPlaceholder("Select gamemode")
+          .addOptions(GAMEMODES.map((gm) => ({ label: gm, value: gm })))
+      );
+      return interaction.editReply({ content: "Which gamemode's cooldown do you want to remove?", components: [row] });
     }
 
     if (itemKey === "extra_slot") {
@@ -2011,7 +2018,7 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
       }
       await addExtraQueueSlot(player.id);
-      return interaction.editReply({ content: `✅ Extra queue slot purchased! You now have **${slots + 1}** extra slot(s). (-${item.price} coins)` });
+      return interaction.editReply({ content: `✅ Extra queue slot purchased! You now have **${slots + 1}** extra slot(s). (-${item.price} coins)`, components: [] });
     }
 
     if (itemKey === "vip_role") {
@@ -2024,12 +2031,93 @@ client.on("interactionCreate", async (interaction) => {
         return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
       }
       await setVipRolePurchased(player.id);
-      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-      if (member) await member.roles.add(VIP_ROLE_ID).catch(() => {});
-      return interaction.editReply({ content: `✅ VIP role purchased! (-${item.price} coins)` });
+      const guildMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (guildMember) await guildMember.roles.add(VIP_ROLE_ID).catch(() => {});
+      return interaction.editReply({ content: `✅ VIP role purchased! (-${item.price} coins)`, components: [] });
     }
+  }
 
-    return interaction.editReply({ content: "Unknown item." });
+  // Shop cooldown gamemode select
+  if (interaction.isStringSelectMenu() && interaction.customId === "shop_cooldown_gamemode") {
+    const gamemode = interaction.values[0];
+    const item = SHOP_ITEMS.cooldown_remove;
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const ok = await spendCoins(player.id, item.price);
+    if (!ok) {
+      const bal = await getCoins(player.id);
+      return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.`, components: [] });
+    }
+    await clearCooldown(gamemode, interaction.user.id);
+    return interaction.editReply({ content: `✅ Cooldown removed for **${gamemode}**! (-${item.price} coins)`, components: [] });
+  }
+
+  // /coinflip
+  if (interaction.isChatInputCommand() && interaction.commandName === "coinflip") {
+    const bet = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const win = Math.random() < 0.5;
+    if (win) {
+      await addCoins(player.id, bet);
+      return interaction.editReply({ content: `🪙 **Heads!** You won **+${bet} coins**! Balance: **${bal + bet}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `🪙 **Tails!** You lost **-${bet} coins**. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /dice
+  if (interaction.isChatInputCommand() && interaction.commandName === "dice") {
+    const bet = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const roll = Math.floor(Math.random() * 6) + 1;
+    const faces = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"];
+    if (roll >= 4) {
+      await addCoins(player.id, bet);
+      return interaction.editReply({ content: `🎲 You rolled **${faces[roll-1]} (${roll})**! You won **+${bet} coins**! Balance: **${bal + bet}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `🎲 You rolled **${faces[roll-1]} (${roll})**! You lost **-${bet} coins**. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /slots
+  if (interaction.isChatInputCommand() && interaction.commandName === "slots") {
+    const bet = interaction.options.getInteger("bet");
+    await interaction.deferReply();
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const bal = await getCoins(player.id);
+    if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
+    const symbols = ["🍒","🍋","🍊","⭐","💎","7️⃣"];
+    const weights  = [30,  25,  20,  15,  7,   3];
+    function spin() {
+      const total = weights.reduce((a, b) => a + b, 0);
+      let r = Math.random() * total;
+      for (let i = 0; i < symbols.length; i++) { r -= weights[i]; if (r <= 0) return i; }
+      return 0;
+    }
+    const s = [spin(), spin(), spin()];
+    const display = `[ ${symbols[s[0]]} | ${symbols[s[1]]} | ${symbols[s[2]]} ]`;
+    let mult = 0;
+    if (s[0] === s[1] && s[1] === s[2]) {
+      mult = s[0] === 5 ? 10 : s[0] === 4 ? 5 : s[0] === 3 ? 3 : 2; // 7️⃣=10x, 💎=5x, ⭐=3x, else=2x
+    } else if (s[0] === s[1] || s[1] === s[2] || s[0] === s[2]) {
+      mult = 0; // partial match = lose
+    }
+    if (mult > 0) {
+      const won = bet * (mult - 1);
+      await addCoins(player.id, won);
+      return interaction.editReply({ content: `🎰 ${display}\n✨ **${mult}x WIN!** +${won} coins! Balance: **${bal + won}**` });
+    } else {
+      await spendCoins(player.id, bet);
+      return interaction.editReply({ content: `🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**` });
+    }
   }
 
   // /punish — restrict a user from queues and tickets

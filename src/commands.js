@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require("discord.js");
-const { GAMEMODES, TIER_OPTIONS, SHOP_ITEMS } = require("./config");
+const { GAMEMODES, TIER_OPTIONS } = require("./config");
 
 const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
@@ -117,17 +117,24 @@ const commands = [
     .setDescription("View the coin shop."),
 
   new SlashCommandBuilder()
-    .setName("buy")
-    .setDescription("Buy an item from the coin shop.")
-    .addStringOption((opt) =>
-      opt.setName("item").setDescription("Item to buy").setRequired(true)
-        .addChoices(
-          ...Object.entries(SHOP_ITEMS).map(([k, v]) => ({ name: `${v.name} (${v.price} coins)`, value: k }))
-        )
-    )
-    .addStringOption((opt) =>
-      opt.setName("gamemode").setDescription("Gamemode (required for cooldown_remove)").setRequired(false)
-        .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
+    .setName("coinflip")
+    .setDescription("Flip a coin — win or lose your bet.")
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("dice")
+    .setDescription("Roll a dice — roll 4+ to double your bet.")
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("slots")
+    .setDescription("Spin the slot machine.")
+    .addIntegerOption((opt) =>
+      opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
     ),
 
   new SlashCommandBuilder()
