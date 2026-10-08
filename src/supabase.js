@@ -720,6 +720,15 @@ async function setVipRolePurchased(playerId) {
   await supabase.from("players").update({ vip_role_purchased: true }).eq("id", playerId);
 }
 
+// Transfer coins from one player to another atomically (spend then add).
+// Returns false if the sender doesn't have enough.
+async function transferCoins(fromId, toId, amount) {
+  const ok = await spendCoins(fromId, amount);
+  if (!ok) return false;
+  await addCoins(toId, amount);
+  return true;
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -780,4 +789,5 @@ module.exports = {
   addExtraQueueSlot,
   hasVipRole,
   setVipRolePurchased,
+  transferCoins,
 };

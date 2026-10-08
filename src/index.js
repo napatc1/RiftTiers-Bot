@@ -113,6 +113,7 @@ const {
   addExtraQueueSlot,
   hasVipRole,
   setVipRolePurchased,
+  transferCoins,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -2093,36 +2094,47 @@ client.on("interactionCreate", async (interaction) => {
 
   // /coinflip
   if (interaction.isChatInputCommand() && interaction.commandName === "coinflip") {
-    const bet = interaction.options.getInteger("bet");
+    const choice = interaction.options.getString("choice");
+    const bet    = interaction.options.getInteger("bet");
     await interaction.deferReply();
     const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
     const bal = await getCoins(player.id);
     if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
-    const win = Math.random() < 0.5;
-    if (win) {
+    const result = Math.random() < 0.5 ? "heads" : "tails";
+    const emoji  = result === "heads" ? "🪙" : "🌑";
+    if (result === choice) {
       await addCoins(player.id, bet);
-      return interaction.editReply({ content: `🪙 **Heads!** You won **+${bet} coins**! Balance: **${bal + bet}**` });
+      return interaction.editReply({ content: `${emoji} **${result.charAt(0).toUpperCase() + result.slice(1)}!** You guessed right — **+${bet} coins**! Balance: **${bal + bet}**` });
     } else {
       await spendCoins(player.id, bet);
-      return interaction.editReply({ content: `🪙 **Tails!** You lost **-${bet} coins**. Balance: **${bal - bet}**` });
+      return interaction.editReply({ content: `${emoji} **${result.charAt(0).toUpperCase() + result.slice(1)}!** Wrong guess — **-${bet} coins**. Balance: **${bal - bet}**` });
     }
   }
 
-  // /dice
+  // /dice — two dice, under/exactly/over 7
   if (interaction.isChatInputCommand() && interaction.commandName === "dice") {
-    const bet = interaction.options.getInteger("bet");
+    const guess = interaction.options.getString("guess");
+    const bet   = interaction.options.getInteger("bet");
     await interaction.deferReply();
     const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
     const bal = await getCoins(player.id);
     if (bal < bet) return interaction.editReply({ content: `Not enough coins. You have **${bal}**, bet is **${bet}**.` });
-    const roll = Math.floor(Math.random() * 6) + 1;
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+    const sum = d1 + d2;
     const faces = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"];
-    if (roll >= 4) {
-      await addCoins(player.id, bet);
-      return interaction.editReply({ content: `🎲 You rolled **${faces[roll-1]} (${roll})**! You won **+${bet} coins**! Balance: **${bal + bet}**` });
+    const display = `${faces[d1-1]} + ${faces[d2-1]} = **${sum}**`;
+    // Under/over pay 1:1; exactly 7 pays 4:1 (17% chance)
+    const actual = sum < 7 ? "under" : sum === 7 ? "seven" : "over";
+    const win = actual === guess;
+    const mult = guess === "seven" ? 4 : 1;
+    if (win) {
+      const won = bet * mult;
+      await addCoins(player.id, won);
+      return interaction.editReply({ content: `🎲 ${display}\n✅ Correct! **+${won} coins**${mult > 1 ? ` (${mult}x)` : ""}! Balance: **${bal + won}**` });
     } else {
       await spendCoins(player.id, bet);
-      return interaction.editReply({ content: `🎲 You rolled **${faces[roll-1]} (${roll})**! You lost **-${bet} coins**. Balance: **${bal - bet}**` });
+      return interaction.editReply({ content: `🎲 ${display}\n❌ Wrong — **-${bet} coins**. Balance: **${bal - bet}**` });
     }
   }
 
@@ -3839,6 +3851,138 @@ client.on("messageCreate", async (message) => {
   // Mirror test channel messages (from any non-bot sender) to test_messages
   // so the website chat panel can display them in real time.
   handleTestChannelMessage(message);
+
+  // --- ! prefix economy commands ---
+  if (!message.author.bot && message.content.startsWith("!")) {
+    const args = message.content.slice(1).trim().split(/\s+/);
+    const cmd  = args[0]?.toLowerCase();
+
+    // !coins [user]
+    if (cmd === "coins") {
+      const target = message.mentions.users.first() || message.author;
+      const player = await ensurePlayerForDiscordUser(target.id, target.username);
+      const bal = await getCoins(player.id);
+      return message.reply(`${target.id === message.author.id ? "You have" : `**${target.username}** has`} **${bal} coins** 🪙`);
+    }
+
+    // !daily
+    if (cmd === "daily") {
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const { success, msLeft } = await claimDaily(player.id);
+      if (!success) {
+        const h = Math.floor(msLeft / 3600000);
+        const m = Math.floor((msLeft % 3600000) / 60000);
+        return message.reply(`You already claimed today. Come back in **${h}h ${m}m**.`);
+      }
+      const bal = await getCoins(player.id);
+      return message.reply(`✅ Claimed **${COIN_REWARDS.DAILY} coins** 🪙 — balance: **${bal}**`);
+    }
+
+    // !shop
+    if (cmd === "shop") {
+      const lines = Object.entries(SHOP_ITEMS).map(([, v]) => `**${v.name}** — ${v.price} 🪙\n> ${v.description}`);
+      return message.reply(`**Coin Shop**\n\n${lines.join("\n\n")}\n\nUse \`/shop\` to buy with buttons.`);
+    }
+
+    // !pay <@user> <amount>
+    if (cmd === "pay") {
+      const target = message.mentions.users.first();
+      const amount = parseInt(args[2] || args[1], 10);
+      if (!target || target.bot || isNaN(amount) || amount < 1) {
+        return message.reply("Usage: `!pay @user <amount>`");
+      }
+      if (target.id === message.author.id) return message.reply("You can't pay yourself.");
+      const sender    = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const recipient = await ensurePlayerForDiscordUser(target.id, target.username);
+      const ok = await transferCoins(sender.id, recipient.id, amount);
+      if (!ok) {
+        const bal = await getCoins(sender.id);
+        return message.reply(`Not enough coins. You have **${bal}**, tried to pay **${amount}**.`);
+      }
+      const senderBal = await getCoins(sender.id);
+      return message.reply(`✅ Paid **${amount} coins** 🪙 to ${target}. Your balance: **${senderBal}**`);
+    }
+
+    // !coinflip <heads|tails> <bet>
+    if (cmd === "coinflip" || cmd === "cf") {
+      const choice = args[1]?.toLowerCase();
+      const bet    = parseInt(args[2], 10);
+      if (!["heads","tails"].includes(choice) || isNaN(bet) || bet < 1) {
+        return message.reply("Usage: `!coinflip <heads|tails> <bet>`");
+      }
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const result = Math.random() < 0.5 ? "heads" : "tails";
+      const emoji  = result === "heads" ? "🪙" : "🌑";
+      if (result === choice) {
+        await addCoins(player.id, bet);
+        return message.reply(`${emoji} **${result.charAt(0).toUpperCase()+result.slice(1)}!** Right — **+${bet} coins**! Balance: **${bal + bet}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`${emoji} **${result.charAt(0).toUpperCase()+result.slice(1)}!** Wrong — **-${bet} coins**. Balance: **${bal - bet}**`);
+      }
+    }
+
+    // !dice <under|seven|over> <bet>
+    if (cmd === "dice") {
+      const guess = args[1]?.toLowerCase();
+      const bet   = parseInt(args[2], 10);
+      if (!["under","seven","over"].includes(guess) || isNaN(bet) || bet < 1) {
+        return message.reply("Usage: `!dice <under|seven|over> <bet>`  (under/over = 1x, seven = 4x)");
+      }
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const d1 = Math.floor(Math.random() * 6) + 1;
+      const d2 = Math.floor(Math.random() * 6) + 1;
+      const sum = d1 + d2;
+      const faces = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣"];
+      const display = `${faces[d1-1]} + ${faces[d2-1]} = **${sum}**`;
+      const actual  = sum < 7 ? "under" : sum === 7 ? "seven" : "over";
+      const mult    = guess === "seven" ? 4 : 1;
+      if (actual === guess) {
+        const won = bet * mult;
+        await addCoins(player.id, won);
+        return message.reply(`🎲 ${display}\n✅ Correct! **+${won} coins**${mult > 1 ? ` (${mult}x)` : ""}! Balance: **${bal + won}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`🎲 ${display}\n❌ Wrong — **-${bet} coins**. Balance: **${bal - bet}**`);
+      }
+    }
+
+    // !slots <bet>
+    if (cmd === "slots") {
+      const bet = parseInt(args[1], 10);
+      if (isNaN(bet) || bet < 1) return message.reply("Usage: `!slots <bet>`");
+      const player = await ensurePlayerForDiscordUser(message.author.id, message.member?.displayName || message.author.username);
+      const bal = await getCoins(player.id);
+      if (bal < bet) return message.reply(`Not enough coins. You have **${bal}**, bet is **${bet}**.`);
+      const symbols = ["🍒","🍋","🍊","⭐","💎","7️⃣"];
+      const weights  = [30,  25,  20,  15,  7,   3];
+      function spinSlot() {
+        const total = weights.reduce((a, b) => a + b, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < symbols.length; i++) { r -= weights[i]; if (r <= 0) return i; }
+        return 0;
+      }
+      const s = [spinSlot(), spinSlot(), spinSlot()];
+      const display = `[ ${symbols[s[0]]} | ${symbols[s[1]]} | ${symbols[s[2]]} ]`;
+      let mult = 0;
+      if (s[0] === s[1] && s[1] === s[2]) {
+        mult = s[0] === 5 ? 10 : s[0] === 4 ? 5 : s[0] === 3 ? 3 : 2;
+      }
+      if (mult > 0) {
+        const won = bet * (mult - 1);
+        await addCoins(player.id, won);
+        return message.reply(`🎰 ${display}\n✨ **${mult}x WIN!** +${won} coins! Balance: **${bal + won}**`);
+      } else {
+        await spendCoins(player.id, bet);
+        return message.reply(`🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**`);
+      }
+    }
+  }
+  // --- end prefix commands ---
 
   // Sticky "Testing Punishments" message in #punishments channel.
   // Whenever anyone (including the bot's own sticky repost) sends a message,

@@ -119,14 +119,26 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("coinflip")
-    .setDescription("Flip a coin — win or lose your bet.")
+    .setDescription("Flip a coin — guess heads or tails to double your bet.")
+    .addStringOption((opt) =>
+      opt.setName("choice").setDescription("Heads or tails?").setRequired(true)
+        .addChoices({ name: "Heads", value: "heads" }, { name: "Tails", value: "tails" })
+    )
     .addIntegerOption((opt) =>
       opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
     ),
 
   new SlashCommandBuilder()
     .setName("dice")
-    .setDescription("Roll a dice — roll 4+ to double your bet.")
+    .setDescription("Roll two dice — guess under 7, exactly 7, or over 7.")
+    .addStringOption((opt) =>
+      opt.setName("guess").setDescription("Your prediction").setRequired(true)
+        .addChoices(
+          { name: "Under 7",    value: "under" },
+          { name: "Exactly 7",  value: "seven" },
+          { name: "Over 7",     value: "over"  },
+        )
+    )
     .addIntegerOption((opt) =>
       opt.setName("bet").setDescription("How many coins to bet").setRequired(true).setMinValue(1)
     ),
