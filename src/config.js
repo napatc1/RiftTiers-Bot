@@ -211,6 +211,9 @@ const SHOP_ITEMS = {
   vip_role:        { name: "VIP Role",           price: 1500, description: "Get the exclusive VIP cosmetic role." },
 };
 
+// How many coins cheaper it is to gift an item vs buying it for yourself.
+const GIFT_DISCOUNT = 500;
+
 // Set this to a real role ID to enable the VIP role shop item.
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID || "";
 
@@ -248,5 +251,6 @@ module.exports = {
   COIN_REWARDS,
   MILESTONE_TIERS,
   SHOP_ITEMS,
+  GIFT_DISCOUNT,
   VIP_ROLE_ID,
 };

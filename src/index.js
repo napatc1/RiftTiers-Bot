@@ -52,6 +52,7 @@ const {
   COIN_REWARDS,
   MILESTONE_TIERS,
   SHOP_ITEMS,
+  GIFT_DISCOUNT,
   VIP_ROLE_ID,
 } = require("./config");
 const {
@@ -2117,6 +2118,81 @@ client.on("interactionCreate", async (interaction) => {
     } else {
       await spendCoins(player.id, bet);
       return interaction.editReply({ content: `🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**` });
+    }
+  }
+
+  // /gift — gift a shop item to another player at a discounted price
+  if (interaction.isChatInputCommand() && interaction.commandName === "gift") {
+    const itemKey   = interaction.options.getString("item");
+    const targetUser = interaction.options.getUser("player");
+    const gamemode   = interaction.options.getString("gamemode");
+
+    if (targetUser.id === interaction.user.id) {
+      return interaction.reply({ content: "You can't gift an item to yourself — use `/shop` instead.", ephemeral: true });
+    }
+    if (targetUser.bot) {
+      return interaction.reply({ content: "You can't gift items to bots.", ephemeral: true });
+    }
+
+    const item = SHOP_ITEMS[itemKey];
+    if (!item) return interaction.reply({ content: "Unknown item.", ephemeral: true });
+    const giftPrice = Math.max(0, item.price - GIFT_DISCOUNT);
+
+    if (itemKey === "cooldown_remove" && !gamemode) {
+      return interaction.reply({ content: "You must specify a **gamemode** when gifting a Cooldown Removal.", ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const sender = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+    if (!targetMember) return interaction.editReply({ content: "That player isn't in this server." });
+    const recipient = await ensurePlayerForDiscordUser(targetUser.id, targetMember.displayName);
+
+    // Deduct coins from sender (free items still go through the check for consistency)
+    if (giftPrice > 0) {
+      const ok = await spendCoins(sender.id, giftPrice);
+      if (!ok) {
+        const bal = await getCoins(sender.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, gifting this costs **${giftPrice}**.` });
+      }
+    }
+
+    // Apply the item to the recipient
+    if (itemKey === "cooldown_remove") {
+      await clearCooldown(gamemode, targetUser.id);
+      return interaction.editReply({
+        content: `🎁 Gifted **Cooldown Removal** (${gamemode}) to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
+    }
+
+    if (itemKey === "extra_slot") {
+      const slots = await getExtraQueueSlots(recipient.id);
+      if (slots >= 2) {
+        // Refund the sender since the gift can't be applied
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: `${targetUser.username} already has the maximum 2 extra queue slots. Your coins were refunded.` });
+      }
+      await addExtraQueueSlot(recipient.id);
+      return interaction.editReply({
+        content: `🎁 Gifted **Extra Queue Slot** to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
+    }
+
+    if (itemKey === "vip_role") {
+      if (!VIP_ROLE_ID) {
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: "VIP role is not configured yet. Your coins were refunded." });
+      }
+      const already = await hasVipRole(recipient.id);
+      if (already) {
+        if (giftPrice > 0) await addCoins(sender.id, giftPrice);
+        return interaction.editReply({ content: `${targetUser.username} already has the VIP role. Your coins were refunded.` });
+      }
+      await setVipRolePurchased(recipient.id);
+      await targetMember.roles.add(VIP_ROLE_ID).catch(() => {});
+      return interaction.editReply({
+        content: `🎁 Gifted **VIP Role** to ${targetUser}!${giftPrice > 0 ? ` (-${giftPrice} coins)` : " (free)"}`,
+      });
     }
   }
 

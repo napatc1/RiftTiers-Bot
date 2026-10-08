@@ -138,6 +138,31 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("gift")
+    .setDescription("Gift a shop item to another player (500 coins cheaper than buying for yourself).")
+    .addStringOption((opt) =>
+      opt
+        .setName("item")
+        .setDescription("Item to gift")
+        .setRequired(true)
+        .addChoices(
+          { name: "Cooldown Removal — 0 🪙",    value: "cooldown_remove" },
+          { name: "Extra Queue Slot — 300 🪙",  value: "extra_slot" },
+          { name: "VIP Role — 1000 🪙",         value: "vip_role" },
+        )
+    )
+    .addUserOption((opt) =>
+      opt.setName("player").setDescription("Player to gift to").setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("gamemode")
+        .setDescription("Gamemode (only needed for Cooldown Removal)")
+        .setRequired(false)
+        .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
+    ),
+
+  new SlashCommandBuilder()
     .setName("punish")
     .setDescription("Restrict a user from queues and tickets. (Managers only)")
     .addUserOption((opt) =>
