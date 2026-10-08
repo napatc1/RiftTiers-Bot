@@ -661,6 +661,65 @@ async function decideMediaApplication(applicationId, status, reviewerDiscordId) 
   return !!data;
 }
 
+// ---------- economy ----------
+
+async function getCoins(playerId) {
+  const { data } = await supabase.from("players").select("coins").eq("id", playerId).single();
+  return data ? data.coins : 0;
+}
+
+async function addCoins(playerId, amount) {
+  await supabase.rpc("increment_coins", { player_id: playerId, amount });
+}
+
+async function spendCoins(playerId, amount) {
+  const current = await getCoins(playerId);
+  if (current < amount) return false;
+  const { error } = await supabase
+    .from("players")
+    .update({ coins: current - amount })
+    .eq("id", playerId)
+    .gte("coins", amount);
+  return !error;
+}
+
+async function claimDaily(playerId) {
+  const { data } = await supabase.from("players").select("daily_claimed_at").eq("id", playerId).single();
+  const lastClaim = data?.daily_claimed_at ? new Date(data.daily_claimed_at) : null;
+  const now = new Date();
+  if (lastClaim) {
+    const msSince = now - lastClaim;
+    if (msSince < 20 * 60 * 60 * 1000) {
+      const msLeft = 20 * 60 * 60 * 1000 - msSince;
+      return { success: false, msLeft };
+    }
+  }
+  await supabase.from("players").update({ daily_claimed_at: now.toISOString() }).eq("id", playerId);
+  await addCoins(playerId, require("./config").COIN_REWARDS.DAILY);
+  return { success: true };
+}
+
+async function getExtraQueueSlots(playerId) {
+  const { data } = await supabase.from("players").select("extra_queue_slots").eq("id", playerId).single();
+  return data ? data.extra_queue_slots : 0;
+}
+
+async function addExtraQueueSlot(playerId) {
+  const current = await getExtraQueueSlots(playerId);
+  if (current >= 2) return false;
+  await supabase.from("players").update({ extra_queue_slots: current + 1 }).eq("id", playerId);
+  return true;
+}
+
+async function hasVipRole(playerId) {
+  const { data } = await supabase.from("players").select("vip_role_purchased").eq("id", playerId).single();
+  return data ? !!data.vip_role_purchased : false;
+}
+
+async function setVipRolePurchased(playerId) {
+  await supabase.from("players").update({ vip_role_purchased: true }).eq("id", playerId);
+}
+
 module.exports = {
   supabase,
   ensurePlayerForDiscordUser,
@@ -713,4 +772,12 @@ module.exports = {
   getMediaApplication,
   setMediaApplicationReviewMessage,
   decideMediaApplication,
+  getCoins,
+  addCoins,
+  spendCoins,
+  claimDaily,
+  getExtraQueueSlots,
+  addExtraQueueSlot,
+  hasVipRole,
+  setVipRolePurchased,
 };

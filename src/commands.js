@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require("discord.js");
-const { GAMEMODES, TIER_OPTIONS } = require("./config");
+const { GAMEMODES, TIER_OPTIONS, SHOP_ITEMS } = require("./config");
 
 const REGIONS = ["NA", "EU", "AS", "ME", "AU"];
 
@@ -99,6 +99,35 @@ const commands = [
         .setDescription("Region (only needed if this player is new)")
         .setRequired(false)
         .addChoices(...REGIONS.map((r) => ({ name: r, value: r })))
+    ),
+
+  new SlashCommandBuilder()
+    .setName("coins")
+    .setDescription("Check your coin balance (or another player's).")
+    .addUserOption((opt) =>
+      opt.setName("player").setDescription("Player to check (leave blank for yourself)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Claim your daily coin reward."),
+
+  new SlashCommandBuilder()
+    .setName("shop")
+    .setDescription("View the coin shop."),
+
+  new SlashCommandBuilder()
+    .setName("buy")
+    .setDescription("Buy an item from the coin shop.")
+    .addStringOption((opt) =>
+      opt.setName("item").setDescription("Item to buy").setRequired(true)
+        .addChoices(
+          ...Object.entries(SHOP_ITEMS).map(([k, v]) => ({ name: `${v.name} (${v.price} coins)`, value: k }))
+        )
+    )
+    .addStringOption((opt) =>
+      opt.setName("gamemode").setDescription("Gamemode (required for cooldown_remove)").setRequired(false)
+        .addChoices(...GAMEMODES.map((gm) => ({ name: gm, value: gm })))
     ),
 
   new SlashCommandBuilder()

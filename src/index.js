@@ -49,6 +49,10 @@ const {
   gamemodeForChannelName,
   regionForChannelName,
   RESTRICTED_ROLE_ID,
+  COIN_REWARDS,
+  MILESTONE_TIERS,
+  SHOP_ITEMS,
+  VIP_ROLE_ID,
 } = require("./config");
 const {
   supabase,
@@ -100,6 +104,14 @@ const {
   getMediaApplication,
   setMediaApplicationReviewMessage,
   decideMediaApplication,
+  getCoins,
+  addCoins,
+  spendCoins,
+  claimDaily,
+  getExtraQueueSlots,
+  addExtraQueueSlot,
+  hasVipRole,
+  setVipRolePurchased,
 } = require("./supabase");
 const {
   initRealtimeSync,
@@ -1930,6 +1942,96 @@ client.on("interactionCreate", async (interaction) => {
     });
   }
 
+  // /coins — check coin balance
+  if (interaction.isChatInputCommand() && interaction.commandName === "coins") {
+    await interaction.deferReply({ ephemeral: true });
+    const target = interaction.options.getUser("player");
+    let player;
+    if (target) {
+      player = await ensurePlayerForDiscordUser(target.id, target.username);
+    } else {
+      player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    }
+    const bal = await getCoins(player.id);
+    const name = target ? `<@${target.id}>` : "You";
+    return interaction.editReply({ content: `${name} have **${bal} coins** 🪙` });
+  }
+
+  // /daily — claim daily coins
+  if (interaction.isChatInputCommand() && interaction.commandName === "daily") {
+    await interaction.deferReply({ ephemeral: true });
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+    const result = await claimDaily(player.id);
+    if (!result.success) {
+      const h = Math.floor(result.msLeft / 3600000);
+      const m = Math.floor((result.msLeft % 3600000) / 60000);
+      return interaction.editReply({ content: `You already claimed today. Come back in **${h}h ${m}m**.` });
+    }
+    const bal = await getCoins(player.id);
+    return interaction.editReply({ content: `You claimed **${COIN_REWARDS.DAILY} coins** 🪙 — balance: **${bal} coins**` });
+  }
+
+  // /shop — view shop
+  if (interaction.isChatInputCommand() && interaction.commandName === "shop") {
+    const lines = Object.entries(SHOP_ITEMS).map(([k, v]) => `**${v.name}** — ${v.price} coins\n> ${v.description}`);
+    const embed = new EmbedBuilder()
+      .setTitle("Coin Shop 🪙")
+      .setDescription(lines.join("\n\n"))
+      .setColor(0xf5c842);
+    return interaction.reply({ embeds: [embed], ephemeral: true });
+  }
+
+  // /buy — purchase shop item
+  if (interaction.isChatInputCommand() && interaction.commandName === "buy") {
+    await interaction.deferReply({ ephemeral: true });
+    const itemKey  = interaction.options.getString("item");
+    const gamemode = interaction.options.getString("gamemode");
+    const item = SHOP_ITEMS[itemKey];
+    if (!item) return interaction.editReply({ content: "Unknown item." });
+
+    const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+
+    if (itemKey === "cooldown_remove") {
+      if (!gamemode) return interaction.editReply({ content: "Specify the `gamemode` option for cooldown removal." });
+      const ok = await spendCoins(player.id, item.price);
+      if (!ok) {
+        const bal = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
+      }
+      await clearCooldown(gamemode, interaction.user.id);
+      return interaction.editReply({ content: `✅ Cooldown removed for **${gamemode}**! (-${item.price} coins)` });
+    }
+
+    if (itemKey === "extra_slot") {
+      const slots = await getExtraQueueSlots(player.id);
+      if (slots >= 2) return interaction.editReply({ content: "You already have the maximum 2 extra queue slots." });
+      const ok = await spendCoins(player.id, item.price);
+      if (!ok) {
+        const bal = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
+      }
+      await addExtraQueueSlot(player.id);
+      return interaction.editReply({ content: `✅ Extra queue slot purchased! You now have **${slots + 1}** extra slot(s). (-${item.price} coins)` });
+    }
+
+    if (itemKey === "vip_role") {
+      if (!VIP_ROLE_ID) return interaction.editReply({ content: "VIP role is not configured yet." });
+      const already = await hasVipRole(player.id);
+      if (already) return interaction.editReply({ content: "You already have the VIP role." });
+      const ok = await spendCoins(player.id, item.price);
+      if (!ok) {
+        const bal = await getCoins(player.id);
+        return interaction.editReply({ content: `Not enough coins. You have **${bal}**, need **${item.price}**.` });
+      }
+      await setVipRolePurchased(player.id);
+      const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (member) await member.roles.add(VIP_ROLE_ID).catch(() => {});
+      return interaction.editReply({ content: `✅ VIP role purchased! (-${item.price} coins)` });
+    }
+
+    return interaction.editReply({ content: "Unknown item." });
+  }
+
   // /punish — restrict a user from queues and tickets
   if (interaction.isChatInputCommand() && interaction.commandName === "punish") {
     const roles = computeRoleFlags(interaction.member);
@@ -3264,6 +3366,23 @@ client.on("interactionCreate", async (interaction) => {
         region,
         timestamp: Date.now(),
       });
+
+      // Award coins to testee and testers
+      try {
+        const testeePlayer = await ensurePlayerForDiscordUser(testeeId, name);
+        await addCoins(testeePlayer.id, COIN_REWARDS.TESTED);
+        // Milestone bonus
+        if (MILESTONE_TIERS.has(tier)) {
+          await addCoins(testeePlayer.id, COIN_REWARDS.MILESTONE);
+        }
+        for (const tid of testerIds) {
+          const tp = await ensurePlayerForDiscordUser(tid, tid);
+          await addCoins(tp.id, COIN_REWARDS.TESTER);
+        }
+      } catch (e) {
+        console.error("[economy] coin award failed:", e.message);
+      }
+
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
