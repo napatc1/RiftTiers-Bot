@@ -27,7 +27,8 @@ const commands = [
           { name: "posttierlistwebsite", value: "posttierlistwebsite" },
           { name: "postserverboosts",    value: "postserverboosts" },
           { name: "postboosterperks",    value: "postboosterperks" },
-          { name: "postboosterwall",     value: "postboosterwall" }
+          { name: "postboosterwall",     value: "postboosterwall" },
+          { name: "postapplications",    value: "postapplications" }
         )
     )
     .addUserOption((opt) =>
