@@ -1214,6 +1214,12 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.deferReply({ ephemeral: true });
 
+    const ALL_APPS_CHANNEL_ID = "1557858263503216710";
+    const allAppsChannel = await interaction.guild.channels.fetch(ALL_APPS_CHANNEL_ID).catch(() => null);
+    if (!allAppsChannel) {
+      return interaction.editReply({ content: "Couldn't find the applications channel." });
+    }
+
     const allAppsEmbed = new EmbedBuilder()
       .setTitle("📋 Apply to RyftTiers")
       .setColor(0x5865f2)
@@ -1242,12 +1248,12 @@ client.on("interactionCreate", async (interaction) => {
       .setLabel("🎬 Media")
       .setStyle(ButtonStyle.Secondary);
 
-    await interaction.channel.send({
+    await allAppsChannel.send({
       embeds: [allAppsEmbed],
       components: [new ActionRowBuilder().addComponents(testerBtn, staffBtn, mediaBtn)],
     });
 
-    return interaction.editReply({ content: "Combined applications embed posted!" });
+    return interaction.editReply({ content: "Applications embed posted!" });
   }
 
   // /util posthightestpanel — posts the high tier test request panel in the current channel
