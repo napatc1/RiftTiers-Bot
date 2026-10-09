@@ -1223,7 +1223,7 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.deferReply({ ephemeral: true });
 
-    const ALL_APPS_CHANNEL_ID = "1557858263503216710";
+    const ALL_APPS_CHANNEL_ID = "1555835615700852766";
     const allAppsChannel = await interaction.guild.channels.fetch(ALL_APPS_CHANNEL_ID).catch(() => null);
     if (!allAppsChannel) {
       return interaction.editReply({ content: "Couldn't find the applications channel." });
