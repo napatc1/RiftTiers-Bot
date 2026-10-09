@@ -2059,7 +2059,7 @@ client.on("interactionCreate", async (interaction) => {
         "Every boost helps our community grow and unlocks more Discord features.\n\n" +
         "**Want to support us? Hit that Boost button! 🚀**"
       )
-      .setFooter({ text: "RYFT TEIRS" });
+      .setFooter({ text: "RYFT TIERS" });
     await interaction.channel.send({ embeds: [embed] });
     return interaction.editReply({ content: "Server boosts info posted!" });
   }
@@ -2487,9 +2487,7 @@ client.on("interactionCreate", async (interaction) => {
 
     // Post to #announcements channel
     const TAG_COLORS = { Launch: 0x4ade80, Feature: 0x3fa0f5, Update: 0xffd54a, Fix: 0xf87171 };
-    const announcementsChannel = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === "announcements"
-    );
+    const announcementsChannel = await interaction.guild.channels.fetch("1557857690091262002").catch(() => null);
     if (announcementsChannel) {
       await announcementsChannel.send({
         embeds: [
