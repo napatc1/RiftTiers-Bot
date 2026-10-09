@@ -1207,6 +1207,49 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Media application embed posted!" });
   }
 
+  // /util postapplications — posts a single combined embed with buttons for all three application types
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "postapplications") {
+    if (!canManageCooldowns(interaction.member)) {
+      return interaction.reply({ content: "Only staff can use this command.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+
+    const allAppsEmbed = new EmbedBuilder()
+      .setTitle("📋 Apply to RyftTiers")
+      .setColor(0x5865f2)
+      .setDescription(
+        "Want to be part of the RyftTiers team? Choose your role below and hit **Apply**.\n\n" +
+        "🧪 **Tester** — Test players and help maintain the tier list. You must be an active PvP player with solid knowledge of the tiers.\n\n" +
+        "🛡️ **Staff** — Moderate the community, oversee tests, and keep the server running smoothly. Must be trustworthy and active.\n\n" +
+        "🎬 **Media** — Content creators who make Minecraft PvP content. Apply for recognition, early access, and a direct line to staff.\n\n" +
+        "You can also apply on the website: **ryfttiers.pages.dev** → Applications tab.\n\n" +
+        "Staff reviews every application — you'll be DM'd either way."
+      )
+      .setFooter({ text: "RYFT TIERS" });
+
+    const testerBtn = new ButtonBuilder()
+      .setCustomId("tester_apply")
+      .setLabel("🧪 Tester")
+      .setStyle(ButtonStyle.Success);
+
+    const staffBtn = new ButtonBuilder()
+      .setCustomId("staff_apply")
+      .setLabel("🛡️ Staff")
+      .setStyle(ButtonStyle.Primary);
+
+    const mediaBtn = new ButtonBuilder()
+      .setCustomId("media_apply")
+      .setLabel("🎬 Media")
+      .setStyle(ButtonStyle.Secondary);
+
+    await interaction.channel.send({
+      embeds: [allAppsEmbed],
+      components: [new ActionRowBuilder().addComponents(testerBtn, staffBtn, mediaBtn)],
+    });
+
+    return interaction.editReply({ content: "Combined applications embed posted!" });
+  }
+
   // /util posthightestpanel — posts the high tier test request panel in the current channel
   if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
     if (!canManageCooldowns(interaction.member)) {
