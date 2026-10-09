@@ -591,6 +591,17 @@ async function getTesterApplication(applicationId) {
   return data;
 }
 
+async function getLatestTesterApplicationForUser(discordId) {
+  const { data } = await supabase
+    .from("tester_applications")
+    .select("id, status, reviewed_at, created_at")
+    .eq("discord_id", discordId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
 async function setTesterApplicationReviewMessage(applicationId, channelId, messageId) {
   await supabase
     .from("tester_applications")
@@ -840,6 +851,7 @@ module.exports = {
   closeSupportTicketFromDiscord,
   createTesterApplication,
   getTesterApplication,
+  getLatestTesterApplicationForUser,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
   createMediaApplication,

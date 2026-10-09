@@ -100,6 +100,7 @@ const {
   closeSupportTicketFromDiscord,
   createTesterApplication,
   getTesterApplication,
+  getLatestTesterApplicationForUser,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
   createMediaApplication,
@@ -2834,6 +2835,22 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- #tester-application ----------
     if (interaction.customId === "tester_apply") {
+      // Block if already a tester
+      const testerRole = interaction.guild.roles.cache.get(PERMISSION_ROLE_IDS.tester);
+      if (testerRole && interaction.member.roles.cache.has(testerRole.id)) {
+        return interaction.reply({ content: "You're already a tester!", ephemeral: true });
+      }
+      // Block if denied within the last 5 days
+      const DENY_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000;
+      const latest = await getLatestTesterApplicationForUser(interaction.user.id);
+      if (latest?.status === "denied" && latest.reviewed_at) {
+        const deniedAt = new Date(latest.reviewed_at).getTime();
+        const remaining = DENY_COOLDOWN_MS - (Date.now() - deniedAt);
+        if (remaining > 0) {
+          const daysLeft = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+          return interaction.reply({ content: `Your last application was denied. You can apply again in **${daysLeft} day${daysLeft !== 1 ? "s" : ""}**.`, ephemeral: true });
+        }
+      }
       return interaction.showModal(buildTesterApplicationModal());
     }
 
@@ -3822,6 +3839,8 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({
         content: `Saved: **${name}** is now **${tier}** in **${gamemode}**. The website will update automatically. They're on a ${COOLDOWN_DAYS}-day cooldown for this gamemode. Closing this ticket in 5 seconds...`,
       });
+      const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
+      await sendBotLog(interaction.guild, `🎯 **Test result submitted** — **${name}**${testeeId ? ` (<@${testeeId}>)` : ""} | ${gamemode.toUpperCase()} | ${changeText} | Region: ${region} | Tester: <@${interaction.user.id}>`);
 
       if (process.env.RESULTS_CHANNEL_ID) {
         const resultsChannel = await interaction.guild.channels
