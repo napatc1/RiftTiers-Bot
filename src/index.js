@@ -2040,17 +2040,26 @@ client.on("interactionCreate", async (interaction) => {
     }
     await interaction.deferReply({ ephemeral: true });
     const embed = new EmbedBuilder()
-      .setTitle("🚀 Server Boosts")
-      .setColor(0xff73fa)
+      .setAuthor({ name: "RYFT TEIRS AGENT" })
+      .setTitle("BOOST INFOMATION")
+      .setColor(0x5865f2)
       .setDescription(
-        "Boosting RyftTiers helps the server grow and unlock better features for everyone!\n\n" +
-        "**Current Boost Perks:**\n" +
-        "• 💜 Exclusive **Booster** role\n" +
-        "• 🎨 Access to the **#booster-perks** channel\n" +
-        "• 🌟 Special recognition in the **#booster-wall**\n" +
-        "• 🪙 Bonus coins on the website economy\n\n" +
-        "Click the boost button on the server banner or use `/boost` to support us!"
-      );
+        "🚀 **SERVER BOOSTER INFO**\n\n" +
+        "Support the server by boosting and unlock exclusive perks! 💎\n\n" +
+        "💎 **BOOSTER PERKS**\n\n" +
+        "🎫 Exclusive Server Booster role\n" +
+        "🏆 Featured on our Booster Wall\n" +
+        "📦 Help influence future server features\n" +
+        "⭐ Special recognition from staff\n\n" +
+        "🚀 **HOW TO BOOST**\n\n" +
+        "1. Boost the server using Discord Nitro.\n" +
+        "2. Your Booster role will be automatically assigned.\n" +
+        "3. Head over to the Booster Zone to see your perks.\n\n" +
+        "💜 **THANK YOU**\n" +
+        "Every boost helps our community grow and unlocks more Discord features.\n\n" +
+        "**Want to support us? Hit that Boost button! 🚀**"
+      )
+      .setFooter({ text: "RYFT TEIRS" });
     await interaction.channel.send({ embeds: [embed] });
     return interaction.editReply({ content: "Server boosts info posted!" });
   }
