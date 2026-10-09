@@ -98,11 +98,11 @@ const GAMEMODE_PING_ROLE_NAMES = {
 // verifies on the website. Matched by name so they can be renamed in Discord
 // without touching the bot (just update these strings to match).
 const REGION_ROLE_NAMES = {
-  NA: "🇺🇸 NA",
-  EU: "🇪🇺 EU",
+  NA: "🇺🇸North America",
+  EU: "🇪🇺Europe",
   AS: "🇨🇳 Asia",
   ME: "🌙 ME",
-  AU: "🇦🇺 AU",
+  AU: "🇦🇺Australia",
 };
 
 // Discord role IDs that grant website permissions. Kept separate from the
