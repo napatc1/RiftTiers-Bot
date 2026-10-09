@@ -4204,7 +4204,7 @@ client.on("messageCreate", async (message) => {
         return message.reply(`🎰 ${display}\nNo match. -${bet} coins. Balance: **${bal - bet}**`);
       }
     }
-  }
+
     // !leaderboard
     if (cmd === "leaderboard" || cmd === "lb") {
       const rows = await getCoinLeaderboard(10);
