@@ -486,6 +486,14 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 
 const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
 const MEDIA_APP_REVIEW_CHANNEL_ID = "1555554767210811442";
+const BOT_LOG_CHANNEL_ID = "1557858411193049239";
+
+async function sendBotLog(guild, content) {
+  try {
+    const ch = await guild.channels.fetch(BOT_LOG_CHANNEL_ID).catch(() => null);
+    if (ch) await ch.send(content);
+  } catch {}
+}
 
 function buildApplicationReviewButtons(type, applicationId) {
   // type: "tester" | "staff" | "media"
@@ -2503,11 +2511,7 @@ client.on("interactionCreate", async (interaction) => {
       console.error("[punish] failed to add restricted role:", err.message);
     });
 
-    const LOG_CHANNEL_ID = "1555554731265630349";
-    const logChannel = await interaction.guild.channels.fetch(LOG_CHANNEL_ID).catch(() => null);
-    if (logChannel) {
-      await logChannel.send(`<@${target.id}> — Has been restricted for **${duration}** for ${reason}`);
-    }
+    await sendBotLog(interaction.guild, `🔒 **Player restricted** — <@${target.id}> | Duration: **${duration}** | Reason: ${reason} | by <@${interaction.user.id}>`);
 
     return interaction.editReply({ content: `<@${target.id}> has been restricted.` });
   }
@@ -2721,6 +2725,8 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({
         content: `Set **${username}** to **${tier}** in **${gamemode}**. The website will update automatically.`,
       });
+      const changeText = existing?.tiers?.[gamemode] ? `${existing.tiers[gamemode]} → ${tier}` : `Untested → ${tier}`;
+      await sendBotLog(interaction.guild, `🎯 **Tier set** — **${username}** | ${gamemode} | ${changeText} | by <@${interaction.user.id}>`);
 
       if (process.env.RESULTS_CHANNEL_ID) {
         const resultsChannel = await interaction.guild.channels
@@ -2896,6 +2902,7 @@ client.on("interactionCreate", async (interaction) => {
           const applicant = await client.users.fetch(app.discord_id);
           await applicant.send("🎉 Your tester application for RyftTiers was **accepted**! You've been given the Tester role.").catch(() => {});
         } catch {}
+        await sendBotLog(interaction.guild, `✅ **Tester application accepted** — <@${app.discord_id}> (IGN: ${app.ign || "unknown"}) by <@${interaction.user.id}>`);
       } else if (appType === "media") {
         const applicationId = Number(appId);
         const decided = await decideMediaApplication(applicationId, "accepted", interaction.user.id);
@@ -2909,6 +2916,7 @@ client.on("interactionCreate", async (interaction) => {
           const applicant = await client.users.fetch(app.discord_id);
           await applicant.send("🎉 Your media role application for RyftTiers was **accepted**! Welcome to the Media team — a staff member will be in touch soon.").catch(() => {});
         } catch {}
+        await sendBotLog(interaction.guild, `✅ **Media application accepted** — <@${app.discord_id}> by <@${interaction.user.id}>`);
       } else {
         // Staff application accept — give Moderator role, update embed, DM applicant
         const discordId = appId.split("_")[1]; // s_<discordId>_<timestamp>
@@ -2929,6 +2937,7 @@ client.on("interactionCreate", async (interaction) => {
           const applicant = await client.users.fetch(discordId);
           await applicant.send("🎉 Your staff application for RyftTiers was **accepted**! You've been given the Moderator role.").catch(() => {});
         } catch {}
+        await sendBotLog(interaction.guild, `✅ **Staff application accepted** — <@${discordId}> by <@${interaction.user.id}>`);
       }
       return;
     }
@@ -3729,6 +3738,7 @@ client.on("interactionCreate", async (interaction) => {
           : "Your tester application for RyftTiers was **denied**. You're welcome to apply again in the future.";
         await applicant.send(dmText).catch(() => {});
       } catch {}
+      await sendBotLog(interaction.guild, `❌ **Tester application denied** — <@${app.discord_id}> (IGN: ${app.ign || "unknown"}) by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`);
     } else if (appType === "media") {
       const applicationId = Number(appId);
       const decided = await decideMediaApplication(applicationId, "denied", interaction.user.id);
@@ -3745,6 +3755,7 @@ client.on("interactionCreate", async (interaction) => {
           : "Your media role application for RyftTiers was **denied**. You're welcome to apply again in the future.";
         await applicant.send(dmText).catch(() => {});
       } catch {}
+      await sendBotLog(interaction.guild, `❌ **Media application denied** — <@${app.discord_id}> by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`);
     } else {
       // Staff application deny
       const discordId = appId.split("_")[1]; // s_<discordId>_<timestamp>
@@ -3763,6 +3774,7 @@ client.on("interactionCreate", async (interaction) => {
           : "Your staff application for RyftTiers was **denied**. You're welcome to apply again in the future.";
         await applicant.send(dmText).catch(() => {});
       } catch {}
+      await sendBotLog(interaction.guild, `❌ **Staff application denied** — <@${discordId}> by <@${interaction.user.id}>${notes ? `\n**Notes:** ${notes}` : ""}`);
     }
     return;
   }
