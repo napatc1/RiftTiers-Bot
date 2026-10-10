@@ -2840,9 +2840,12 @@ client.on("interactionCreate", async (interaction) => {
       if (testerRole && interaction.member.roles.cache.has(testerRole.id)) {
         return interaction.reply({ content: "You're already a tester!", ephemeral: true });
       }
-      // Block if denied within the last 5 days
+      // Block if already has a pending application
       const DENY_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000;
       const latest = await getLatestTesterApplicationForUser(interaction.user.id);
+      if (latest?.status === "pending") {
+        return interaction.reply({ content: "You already have a pending tester application. Wait for staff to review it before applying again.", ephemeral: true });
+      }
       if (latest?.status === "denied" && latest.reviewed_at) {
         const deniedAt = new Date(latest.reviewed_at).getTime();
         const remaining = DENY_COOLDOWN_MS - (Date.now() - deniedAt);
