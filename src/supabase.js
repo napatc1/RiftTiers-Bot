@@ -623,6 +623,17 @@ async function decideTesterApplication(applicationId, status, reviewerDiscordId)
   return !!data;
 }
 
+async function getLatestMediaApplicationForUser(discordId) {
+  const { data } = await supabase
+    .from("media_applications")
+    .select("id, status, reviewed_at, created_at")
+    .eq("discord_id", discordId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data;
+}
+
 // ---------- media applications ----------
 
 async function createMediaApplication(discordUserId, { ign, region, contentType, channelLink, followerCount, sampleVideos, whyMedia }) {
@@ -854,6 +865,7 @@ module.exports = {
   getLatestTesterApplicationForUser,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
+  getLatestMediaApplicationForUser,
   createMediaApplication,
   getMediaApplication,
   setMediaApplicationReviewMessage,

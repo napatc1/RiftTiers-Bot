@@ -103,6 +103,7 @@ const {
   getLatestTesterApplicationForUser,
   setTesterApplicationReviewMessage,
   decideTesterApplication,
+  getLatestMediaApplicationForUser,
   createMediaApplication,
   getMediaApplication,
   setMediaApplicationReviewMessage,
@@ -2860,10 +2861,22 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- #media-application ----------
     if (interaction.customId === "media_apply") {
+      const latestMedia = await getLatestMediaApplicationForUser(interaction.user.id);
+      if (latestMedia?.status === "pending") {
+        return interaction.reply({ content: "You already have a pending media application. Wait for staff to review it.", ephemeral: true });
+      }
+      if (latestMedia?.status === "accepted") {
+        return interaction.reply({ content: "You already have an accepted media application!", ephemeral: true });
+      }
       return interaction.showModal(buildMediaApplicationModal());
     }
 
     if (interaction.customId === "staff_apply") {
+      // Block if already a moderator/manager/owner
+      const staffRoleIds = [PERMISSION_ROLE_IDS.moderator, PERMISSION_ROLE_IDS.manager, PERMISSION_ROLE_IDS.owner];
+      if (staffRoleIds.some((id) => interaction.member.roles.cache.has(id))) {
+        return interaction.reply({ content: "You're already a staff member!", ephemeral: true });
+      }
       const modal = new ModalBuilder()
         .setCustomId("staff_apply_modal")
         .setTitle("Staff Application")
