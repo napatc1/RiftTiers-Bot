@@ -486,7 +486,8 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 }
 
 const APP_REVIEW_CHANNEL_ID = "1557858263503216710";
-const MEDIA_APP_REVIEW_CHANNEL_ID = "1557858263503216710";
+const STAFF_APP_REVIEW_CHANNEL_ID = "1555516390822252654";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1556650541696946338";
 const BOT_LOG_CHANNEL_ID = "1557858411193049239";
 
 async function sendBotLog(guild, content) {
@@ -3636,7 +3637,7 @@ client.on("interactionCreate", async (interaction) => {
       const player = await ensurePlayerForDiscordUser(interaction.user.id, interaction.user.username);
       const ign    = player.username?.startsWith("discord-") ? interaction.user.username : (player.username || interaction.user.username);
       const region = player.region || "N/A";
-      const reviewChannel = await interaction.guild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+      const reviewChannel = await interaction.guild.channels.fetch(STAFF_APP_REVIEW_CHANNEL_ID).catch(() => null);
       if (reviewChannel) {
         const staffAppId = `s_${interaction.user.id}_${Date.now()}`;
         const embed = new EmbedBuilder()
@@ -4099,7 +4100,7 @@ client.once("ready", async () => {
         const app = payload.new;
         if (!app) return;
         try {
-          const reviewChannel = await appGuild.channels.fetch(APP_REVIEW_CHANNEL_ID).catch(() => null);
+          const reviewChannel = await appGuild.channels.fetch(STAFF_APP_REVIEW_CHANNEL_ID).catch(() => null);
           if (!reviewChannel) return;
           const staffAppId = `s_${app.discord_id}_${app.id}`;
           const embed = new EmbedBuilder()
