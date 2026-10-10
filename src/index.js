@@ -485,8 +485,8 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
     );
 }
 
-const APP_REVIEW_CHANNEL_ID = "1555554767210811442";
-const MEDIA_APP_REVIEW_CHANNEL_ID = "1555554767210811442";
+const APP_REVIEW_CHANNEL_ID = "1557858263503216710";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1557858263503216710";
 const BOT_LOG_CHANNEL_ID = "1557858411193049239";
 
 async function sendBotLog(guild, content) {
