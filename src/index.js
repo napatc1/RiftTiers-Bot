@@ -2861,12 +2861,12 @@ client.on("interactionCreate", async (interaction) => {
 
     // ---------- #media-application ----------
     if (interaction.customId === "media_apply") {
+      if (interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.media)) {
+        return interaction.reply({ content: "You already have the Media role!", ephemeral: true });
+      }
       const latestMedia = await getLatestMediaApplicationForUser(interaction.user.id);
       if (latestMedia?.status === "pending") {
         return interaction.reply({ content: "You already have a pending media application. Wait for staff to review it.", ephemeral: true });
-      }
-      if (latestMedia?.status === "accepted") {
-        return interaction.reply({ content: "You already have an accepted media application!", ephemeral: true });
       }
       return interaction.showModal(buildMediaApplicationModal());
     }
@@ -2947,8 +2947,15 @@ client.on("interactionCreate", async (interaction) => {
         const statusLine = `\n\n✅ **Accepted** by <@${interaction.user.id}>`;
         await interaction.message.edit({ embeds: [buildMediaReviewEmbed(app, statusLine)], components: [] }).catch(() => {});
         try {
+          const member = await interaction.guild.members.fetch(app.discord_id);
+          const mediaRole = interaction.guild.roles.cache.get(PERMISSION_ROLE_IDS.media);
+          if (mediaRole) await member.roles.add(mediaRole).catch(() => {});
+        } catch (err) {
+          console.error("Couldn't add Media role:", err.message);
+        }
+        try {
           const applicant = await client.users.fetch(app.discord_id);
-          await applicant.send("🎉 Your media role application for RyftTiers was **accepted**! Welcome to the Media team — a staff member will be in touch soon.").catch(() => {});
+          await applicant.send("🎉 Your media role application for RyftTiers was **accepted**! You've been given the Media role.").catch(() => {});
         } catch {}
         await sendBotLog(interaction.guild, `✅ **Media application accepted** — <@${app.discord_id}> by <@${interaction.user.id}>`);
       } else {

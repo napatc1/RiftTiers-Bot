@@ -114,6 +114,7 @@ const PERMISSION_ROLE_IDS = {
   tester: "1555516030082879569",
   moderator: "1555516390822252654",
   owner: "1555516243388399636",
+  media: "1556650541696946338",
 };
 
 // Players with this role are banned from joining queues or opening support
