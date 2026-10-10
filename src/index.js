@@ -1267,6 +1267,48 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "Applications embed posted!" });
   }
 
+  // /util lockdown — deny SendMessages for @everyone in all channels except exempted ones
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "lockdown") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers and owners can use lockdown.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const EXEMPT_CHANNEL_IDS = new Set(["1557857956656316447", "1557858028647354450"]);
+    const everyone = interaction.guild.roles.everyone;
+    const channels = await interaction.guild.channels.fetch();
+    let locked = 0;
+    for (const [, channel] of channels) {
+      if (!channel || EXEMPT_CHANNEL_IDS.has(channel.id)) continue;
+      if (!channel.isTextBased || !channel.isTextBased()) continue;
+      await channel.permissionOverwrites.edit(everyone, { SendMessages: false }).catch(() => {});
+      locked++;
+    }
+    await sendBotLog(interaction.guild, `🔒 **Server locked down** by <@${interaction.user.id}> — ${locked} channels locked.`);
+    return interaction.editReply({ content: `🔒 Server locked. ${locked} channels restricted to mod+ only.` });
+  }
+
+  // /util unlockdown — restore SendMessages for @everyone (null = inherit from category)
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "unlockdown") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers and owners can use unlockdown.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const EXEMPT_CHANNEL_IDS = new Set(["1557857956656316447", "1557858028647354450"]);
+    const everyone = interaction.guild.roles.everyone;
+    const channels = await interaction.guild.channels.fetch();
+    let unlocked = 0;
+    for (const [, channel] of channels) {
+      if (!channel || EXEMPT_CHANNEL_IDS.has(channel.id)) continue;
+      if (!channel.isTextBased || !channel.isTextBased()) continue;
+      await channel.permissionOverwrites.edit(everyone, { SendMessages: null }).catch(() => {});
+      unlocked++;
+    }
+    await sendBotLog(interaction.guild, `🔓 **Server unlocked** by <@${interaction.user.id}> — ${unlocked} channels restored.`);
+    return interaction.editReply({ content: `🔓 Server unlocked. ${unlocked} channels restored.` });
+  }
+
   // /util posthightestpanel — posts the high tier test request panel in the current channel
   if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
     if (!canManageCooldowns(interaction.member)) {

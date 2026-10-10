@@ -28,7 +28,9 @@ const commands = [
           { name: "postserverboosts",    value: "postserverboosts" },
           { name: "postboosterperks",    value: "postboosterperks" },
           { name: "postboosterwall",     value: "postboosterwall" },
-          { name: "postapplications",    value: "postapplications" }
+          { name: "postapplications",    value: "postapplications" },
+          { name: "lockdown",            value: "lockdown" },
+          { name: "unlockdown",          value: "unlockdown" }
         )
     )
     .addUserOption((opt) =>
