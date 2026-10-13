@@ -698,7 +698,8 @@ async function getCoins(playerId) {
 }
 
 async function addCoins(playerId, amount) {
-  await supabase.rpc("increment_coins", { player_id: playerId, amount });
+  const { error } = await supabase.rpc("increment_coins", { player_id: playerId, amount });
+  if (error) throw error;
 }
 
 async function spendCoins(playerId, amount) {

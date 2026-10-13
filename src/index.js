@@ -887,16 +887,17 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
   try {
     const queueChannel = await guild.channels.fetch(info.queueChannelId);
     const queueMessage = await queueChannel.messages.fetch(info.queueMessageId);
+    const baseKey = `${info.gamemode}:${info.region}`;
     if (info.isHigh) {
-      const highKey = `${info.gamemode}:high`;
+      const highKey = `${baseKey}:high`;
       await queueMessage.edit({
         embeds: [await buildHighQueueEmbed(highKey, info.gamemode)],
         components: await buildHighQueueButtons(highKey),
       });
     } else {
       await queueMessage.edit({
-        embeds: [await buildQueueEmbed(info.gamemode, info.gamemode)],
-        components: await buildQueueButtons(info.gamemode),
+        embeds: [await buildQueueEmbed(baseKey, info.gamemode)],
+        components: await buildQueueButtons(baseKey),
       });
     }
   } catch (err) {
@@ -1424,11 +1425,14 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     try {
-      // 1. Suppress realtime for all queue keys before touching DB/channels.
+      // 1. Suppress realtime for all queue keys for 5 minutes — the full
+      //    rebuild takes longer than the old 15 s default, which let
+      //    Supabase realtime fire mid-loop and post duplicate queue cards.
+      const REBUILD_SUPPRESS_MS = 5 * 60 * 1000;
       for (const gamemode of GAMEMODES) {
         for (const region of REGIONS) {
-          suppressRealtimeFor(`${gamemode}:${region}`, 15000);
-          suppressRealtimeFor(`${gamemode}:${region}:high`, 15000);
+          suppressRealtimeFor(`${gamemode}:${region}`, REBUILD_SUPPRESS_MS);
+          suppressRealtimeFor(`${gamemode}:${region}:high`, REBUILD_SUPPRESS_MS);
         }
       }
 
@@ -1481,12 +1485,15 @@ client.on("interactionCreate", async (interaction) => {
           const highKey = `${queueKey}:high`;
           await deleteQueueMessage(queueKey);
           await deleteQueueMessage(highKey);
-          suppressRealtimeFor(queueKey);
-          suppressRealtimeFor(highKey);
+          suppressRealtimeFor(queueKey, REBUILD_SUPPRESS_MS);
+          suppressRealtimeFor(highKey, REBUILD_SUPPRESS_MS);
           await setQueueClosed(queueKey, true);
           await setQueueLocked(queueKey, false);
           await setQueueClosed(highKey, true);
           await setQueueLocked(highKey, false);
+
+          // Clear any stale messages that survived a failed channel delete.
+          await channel.bulkDelete(100).catch(() => {});
 
           const display = `${GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode} (${region})`;
           await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
@@ -2923,14 +2930,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       const nowLocked = !(await getQueueLocked(queueKey));
       await setQueueLocked(queueKey, nowLocked);
       await refreshQueueMessage(interaction, queueKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: nowLocked ? "Queue locked to new joins." : "Queue unlocked.",
-        ephemeral: true,
       });
     }
 
@@ -2940,24 +2947,25 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       // Remove this tester from the active list first.
       await removeQueueTester(queueKey, interaction.user.id);
       const remaining = await getQueueTesterIds(queueKey);
       if (remaining.length > 0) {
         // Other testers still active — just refresh the card without closing.
-        await interaction.reply({ content: "You've stopped testing. The queue stays open for the other testers.", ephemeral: true });
         suppressRealtimeFor(queueKey);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        await interaction.editReply({ content: "You've stopped testing. The queue stays open for the other testers." });
       } else {
         // Last tester — fully close and wipe.
-        await interaction.reply({ content: "Closing the queue.", ephemeral: true });
         suppressRealtimeFor(queueKey);
         await setQueueClosed(queueKey, true);
         await setQueueLocked(queueKey, false);
         await clearQueueEntries(queueKey);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        await interaction.editReply({ content: "Closing the queue." });
       }
       return;
     }
@@ -2997,6 +3005,7 @@ client.on("interactionCreate", async (interaction) => {
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
           gamemode,
+          region,
           isHigh: false,
         });
 
@@ -3142,14 +3151,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       const nowLocked = !(await getQueueLocked(highKey));
       await setQueueLocked(highKey, nowLocked);
       await refreshHighQueueMessage(interaction, highKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: nowLocked ? "High queue locked to new joins." : "High queue unlocked.",
-        ephemeral: true,
       });
     }
 
@@ -3157,21 +3166,22 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       await removeQueueTester(highKey, interaction.user.id);
       const remaining = await getQueueTesterIds(highKey);
       if (remaining.length > 0) {
-        await interaction.reply({ content: "You've stopped testing. The high queue stays open for the other testers.", ephemeral: true });
         suppressRealtimeFor(highKey);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+        await interaction.editReply({ content: "You've stopped testing. The high queue stays open for the other testers." });
       } else {
-        await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
         suppressRealtimeFor(highKey);
         await setQueueClosed(highKey, true);
         await setQueueLocked(highKey, false);
         await clearQueueEntries(highKey);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+        await interaction.editReply({ content: "Closing this high queue." });
       }
       return;
     }
@@ -3210,6 +3220,7 @@ client.on("interactionCreate", async (interaction) => {
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
           gamemode,
+          region,
           isHigh: true,
         });
 
@@ -3586,6 +3597,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    await interaction.deferReply();
     try {
       const existingPlayer = await getPlayer(name);
       const previousTier = existingPlayer?.tiers?.[gamemode];
@@ -3594,7 +3606,7 @@ client.on("interactionCreate", async (interaction) => {
       if (testeeId) {
         await setCooldown(gamemode, testeeId, Date.now() + COOLDOWN_MS);
       }
-      await interaction.reply({
+      await interaction.editReply({
         content: `Saved: **${name}** is now **${tier}** in **${gamemode}**. The website will update automatically. They're on a ${COOLDOWN_DAYS}-day cooldown for this gamemode. Closing this ticket in 5 seconds...`,
       });
       const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
@@ -3669,9 +3681,8 @@ client.on("interactionCreate", async (interaction) => {
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
-      return interaction.reply({
+      return interaction.editReply({
         content: "Something went wrong saving that to the database.",
-        ephemeral: true,
       });
     }
   }
@@ -3909,17 +3920,17 @@ client.once("ready", async () => {
 // Fires whenever a member's roles (or anything else) change — keeps the
 // website's permission flags current the moment staff are promoted/demoted.
 client.on("guildMemberUpdate", (_oldMember, newMember) => {
-  syncMemberRoles(newMember);
+  syncMemberRoles(newMember).catch((err) => console.error("[guildMemberUpdate]", err.message));
 });
 
 // Relays staff replies typed directly in a ticket channel back to the
 // website (handleTicketChannelMessage no-ops instantly for any other
 // channel, so this is cheap to call for every message).
 client.on("messageCreate", async (message) => {
-  handleTicketChannelMessage(message);
+  handleTicketChannelMessage(message).catch((err) => console.error("[handleTicketChannelMessage]", err.message));
   // Mirror test channel messages (from any non-bot sender) to test_messages
   // so the website chat panel can display them in real time.
-  handleTestChannelMessage(message);
+  handleTestChannelMessage(message).catch((err) => console.error("[handleTestChannelMessage]", err.message));
 
   // --- ! prefix economy commands ---
   if (!message.author.bot && message.content.startsWith("!")) {
