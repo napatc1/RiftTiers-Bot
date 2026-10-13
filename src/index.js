@@ -236,8 +236,7 @@ async function lockChannelToTesters(guild, channel) {
 // somehow isn't around) — mentioned so players know where to chat instead.
 function buildWaitingListMessage(gamemodeDisplay, commandsChannel) {
   const commandsMention = commandsChannel ? `<#${commandsChannel.id}>` : "#commands";
-  return `@everyone
-**__${gamemodeDisplay} Tier Test__**
+  return `**__${gamemodeDisplay} Tier Test__**
 
 Being in the waitlist simply means that you are waiting to be tested at some point, it does not mean you are immediately going to be tested right away. Please be patient!
 
