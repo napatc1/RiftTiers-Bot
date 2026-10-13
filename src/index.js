@@ -496,7 +496,9 @@ async function sendBotLog(guild, content) {
   try {
     const ch = await guild.channels.fetch(BOT_LOG_CHANNEL_ID).catch(() => null);
     if (ch) await ch.send(content);
-  } catch {}
+  } catch (err) {
+    console.error("[botlog]", err.message);
+  }
 }
 
 function buildApplicationReviewButtons(type, applicationId) {
@@ -1905,9 +1907,8 @@ client.on("interactionCreate", async (interaction) => {
     const { gamemode, region } = parsed;
     const queueKey = `${gamemode}:${region}`;
     const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
-    const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-      interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-    if (!isManagerPlus && tester?.region !== region) {
+    const { isManager, isOwner } = computeRoleFlags(interaction.member);
+    if (!isManager && !isOwner && tester?.region !== region) {
       return interaction.reply({
         content: tester?.region
           ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
@@ -2938,9 +2939,18 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.media)) {
         return interaction.reply({ content: "You already have the Media role!", ephemeral: true });
       }
+      const DENY_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000;
       const latestMedia = await getLatestMediaApplicationForUser(interaction.user.id);
       if (latestMedia?.status === "pending") {
         return interaction.reply({ content: "You already have a pending media application. Wait for staff to review it.", ephemeral: true });
+      }
+      if (latestMedia?.status === "denied" && latestMedia.reviewed_at) {
+        const deniedAt = new Date(latestMedia.reviewed_at).getTime();
+        const remaining = DENY_COOLDOWN_MS - (Date.now() - deniedAt);
+        if (remaining > 0) {
+          const daysLeft = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+          return interaction.reply({ content: `Your last application was denied. You can apply again in **${daysLeft} day${daysLeft !== 1 ? "s" : ""}**.`, ephemeral: true });
+        }
       }
       return interaction.showModal(buildMediaApplicationModal());
     }
@@ -3156,9 +3166,8 @@ client.on("interactionCreate", async (interaction) => {
     // Returns the tester's own region string on success, or replies with an
     // error and returns null.
     async function requireOwnRegion(member, userId) {
-      const isManagerPlus = member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (isManagerPlus) return { ok: true };
+      const { isManager, isOwner } = computeRoleFlags(member);
+      if (isManager || isOwner) return { ok: true };
       const tester = await ensurePlayerForDiscordUser(userId, member.displayName);
       if (!tester?.region) {
         return {
@@ -3192,9 +3201,8 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (!isManagerPlus && joiner.region !== region) {
+      const { isManager, isOwner } = computeRoleFlags(interaction.member);
+      if (!isManager && !isOwner && joiner.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === joiner.region
         );
@@ -3418,9 +3426,8 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (!isManagerPlus && player.region !== region) {
+      const { isManager, isOwner } = computeRoleFlags(interaction.member);
+      if (!isManager && !isOwner && player.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === player.region
         );

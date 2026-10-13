@@ -85,7 +85,8 @@ async function setPlayerTier(playerName, region, gamemode, tier) {
 async function removePlayerTier(playerName, gamemode) {
   const player = await getPlayerRowByUsername(playerName);
   if (!player) return;
-  await supabase.from("player_tiers").delete().eq("player_id", player.id).eq("gamemode", gamemode);
+  const { error } = await supabase.from("player_tiers").delete().eq("player_id", player.id).eq("gamemode", gamemode);
+  if (error) throw error;
 }
 
 async function getPlayer(playerName) {
