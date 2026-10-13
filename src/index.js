@@ -62,6 +62,7 @@ const {
   syncProfileRoles,
   getPlayerRowByUsername,
   setPlayerTier,
+  removePlayerTier,
   getPlayer,
   getCooldownUntil,
   setCooldown,
@@ -2788,6 +2789,14 @@ client.on("interactionCreate", async (interaction) => {
 
     try {
       const previousTier = existing?.tiers?.[gamemode];
+      if (tier === "Unranked") {
+        await removePlayerTier(username, gamemode);
+        await interaction.reply({
+          content: `Removed **${username}**'s tier for **${gamemode}** — they are now unranked. The website will update automatically.`,
+        });
+        const changeText = previousTier ? `${previousTier} → Unranked` : `Untested → Unranked`;
+        await sendBotLog(interaction.guild, `🎯 **Tier set** — **${username}** | ${gamemode} | ${changeText} | by <@${interaction.user.id}>`);
+      } else {
       await setPlayerTier(username, region, gamemode, tier);
       await interaction.reply({
         content: `Set **${username}** to **${tier}** in **${gamemode}**. The website will update automatically.`,
@@ -2829,6 +2838,7 @@ client.on("interactionCreate", async (interaction) => {
           isManual: true,
         });
       }
+      } // end else (non-Unranked)
     } catch (err) {
       console.error(err);
       return interaction.reply({

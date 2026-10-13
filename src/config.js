@@ -123,7 +123,7 @@ const RESTRICTED_ROLE_ID = "1555849744843153451";
 
 // Tiers a tester can assign, best to worst. Matches tiers.js on the website.
 const TIER_OPTIONS = [
-  "HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5",
+  "HT1", "LT1", "HT2", "LT2", "HT3", "LT3", "HT4", "LT4", "HT5", "LT5", "Unranked",
 ];
 
 // How long a player must wait after being tested before they can queue

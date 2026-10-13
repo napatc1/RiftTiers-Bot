@@ -82,6 +82,12 @@ async function setPlayerTier(playerName, region, gamemode, tier) {
   if (error) throw error;
 }
 
+async function removePlayerTier(playerName, gamemode) {
+  const player = await getPlayerRowByUsername(playerName);
+  if (!player) return;
+  await supabase.from("player_tiers").delete().eq("player_id", player.id).eq("gamemode", gamemode);
+}
+
 async function getPlayer(playerName) {
   const player = await getPlayerRowByUsername(playerName);
   if (!player) return null;
@@ -822,6 +828,7 @@ module.exports = {
   syncProfileRoles,
   getPlayerRowByUsername,
   setPlayerTier,
+  removePlayerTier,
   getPlayer,
   getCooldownUntil,
   setCooldown,
