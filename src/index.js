@@ -1884,7 +1884,9 @@ client.on("interactionCreate", async (interaction) => {
     const { gamemode, region } = parsed;
     const queueKey = `${gamemode}:${region}`;
     const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
-    if (tester?.region !== region) {
+    const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
+      interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
+    if (!isManagerPlus && tester?.region !== region) {
       return interaction.reply({
         content: tester?.region
           ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
@@ -3124,6 +3126,9 @@ client.on("interactionCreate", async (interaction) => {
     // Returns the tester's own region string on success, or replies with an
     // error and returns null.
     async function requireOwnRegion(member, userId) {
+      const isManagerPlus = member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
+        member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
+      if (isManagerPlus) return { ok: true };
       const tester = await ensurePlayerForDiscordUser(userId, member.displayName);
       if (!tester?.region) {
         return {
@@ -3157,7 +3162,9 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      if (joiner.region !== region) {
+      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
+        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
+      if (!isManagerPlus && joiner.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === joiner.region
         );
@@ -3381,7 +3388,9 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      if (player.region !== region) {
+      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
+        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
+      if (!isManagerPlus && player.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === player.region
         );
