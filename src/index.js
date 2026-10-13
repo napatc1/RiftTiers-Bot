@@ -1419,8 +1419,8 @@ client.on("interactionCreate", async (interaction) => {
 
     await interaction.deferReply({ ephemeral: true });
 
-    const commandsChannel = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === "commands"
+    const commandsChannel = await interaction.guild.channels.fetch("1557857956656316447").catch(() =>
+      interaction.guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === "commands")
     );
 
     try {
