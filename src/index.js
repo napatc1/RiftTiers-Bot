@@ -700,6 +700,11 @@ async function buildQueueEmbed(queueKey, gamemode) {
   if (closed) {
     return embed.setDescription(await closedCardDescription(queueKey));
   }
+  const active = getActiveTesting(queueKey);
+  if (active?.testeeId) {
+    const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
+    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
+  }
   return embed
     .setTitle(`${gamemode.toUpperCase()} ${region} Queue (${count})${locked ? " — LOCKED" : ""}`)
     .setDescription(
@@ -721,6 +726,11 @@ async function buildHighQueueEmbed(highKey, gamemode) {
     .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xff8a3d);
   if (closed) {
     return embed.setDescription(await closedCardDescription(highKey));
+  }
+  const active = getActiveTesting(highKey);
+  if (active?.testeeId) {
+    const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
+    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
   }
   return embed
     .setTitle(`${gamemode.toUpperCase()} ${region} HIGH Queue (${count})${locked ? " — LOCKED" : ""}`)
@@ -1009,12 +1019,16 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
     embeds: [
-      new EmbedBuilder()
-        .setTitle(`${gamemode.toUpperCase()} test in progress`)
-        .setDescription(
-          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
-        )
-        .setColor(0xffd54a),
+      (() => {
+        const e = new EmbedBuilder()
+          .setTitle(`${gamemode.toUpperCase()} test in progress`)
+          .setDescription(
+            `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
+          )
+          .setColor(0xffd54a);
+        if (testeeUsername) e.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(testeeUsername)}/128`);
+        return e;
+      })(),
     ],
     components: [buildTicketButtons(gamemode, testeeId)],
   });
@@ -1121,6 +1135,7 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
     embeds: [
       new EmbedBuilder()
         .setDescription(desc)
+        .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
         .setColor(color)
         .setTimestamp(),
     ],
@@ -3967,6 +3982,7 @@ client.on("interactionCreate", async (interaction) => {
                 .setDescription(
                   `**${name}**${testeeId ? ` (<@${testeeId}>)` : ""} in **${gamemode.toUpperCase()}**: ${changeText}\nRegion: ${region}\nTested by: <@${interaction.user.id}>`
                 )
+                .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(name)}/128`)
                 .setColor(0xffd54a),
             ],
           });
