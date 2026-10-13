@@ -1309,6 +1309,26 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: `🔓 Server unlocked. ${unlocked} channels restored.` });
   }
 
+  // /util closequeue — force-closes the queue in the current channel (keeps testers + queue positions)
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "closequeue") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers and owners can use closequeue.", ephemeral: true });
+    }
+    const parsed = parseChannelName(interaction.channel.name);
+    if (!parsed) {
+      return interaction.reply({ content: "Run this inside a tiertest channel.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const { gamemode, region } = parsed;
+    const queueKey = `${gamemode}:${region}`;
+    suppressRealtimeFor(queueKey);
+    await setQueueClosed(queueKey, true);
+    await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+    await sendBotLog(interaction.guild, `🔒 **Queue closed** — ${gamemode.toUpperCase()} (${region}) by <@${interaction.user.id}> (testers and queue positions preserved)`);
+    return interaction.editReply({ content: `Queue closed. Testers and queue positions are preserved — use the **Open Queue** button to reopen.` });
+  }
+
   // /util posthightestpanel — posts the high tier test request panel in the current channel
   if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
     if (!canManageCooldowns(interaction.member)) {
