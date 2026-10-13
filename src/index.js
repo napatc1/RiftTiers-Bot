@@ -1634,24 +1634,11 @@ client.on("interactionCreate", async (interaction) => {
     const categoriesCreated = [];
     const posted = [];
     const skipped = [];
-
     const migratedAway = [];
-    for (const gamemode of GAMEMODES) {
-      const categoryName = queueCategoryName(gamemode);
-      let category = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
-      );
-      if (!category) {
-        category = await interaction.guild.channels.create({
-          name: categoryName,
-          type: ChannelType.GuildCategory,
-        });
-        categoriesCreated.push(categoryName);
-      }
 
-      // Clean up a leftover pre-region channel for this gamemode (e.g. the
-      // old single "💎-crystal-tiertest") — it's being replaced by one
-      // channel per region below, so there's nothing useful left in it.
+    // Delete leftover pre-region channels (e.g. old "💎-crystal-tiertest"
+    // without a region suffix) — replaced by per-region channels below.
+    for (const gamemode of GAMEMODES) {
       const base = baseChannelName(gamemode);
       const legacyChannel = interaction.guild.channels.cache.find(
         (c) => c.type === ChannelType.GuildText && base && c.name.endsWith(base) && !parseChannelName(c.name)
@@ -1662,8 +1649,29 @@ client.on("interactionCreate", async (interaction) => {
           console.error(`[setupqueues] couldn't delete legacy #${legacyChannel.name}:`, err.message)
         );
       }
+    }
 
-      for (const region of REGIONS) {
+    // One category per region (NA, EU, AS, ME, AU), each containing every
+    // gamemode's channel. Create or find each region category first.
+    const regionCategories = {};
+    for (const region of REGIONS) {
+      let category = interaction.guild.channels.cache.find(
+        (c) => c.type === ChannelType.GuildCategory && c.name === region
+      );
+      if (!category) {
+        category = await interaction.guild.channels.create({
+          name: region,
+          type: ChannelType.GuildCategory,
+        });
+        categoriesCreated.push(region);
+      }
+      regionCategories[region] = category;
+    }
+
+    // Create/move every (gamemode, region) channel into its region category.
+    for (const region of REGIONS) {
+      const category = regionCategories[region];
+      for (const gamemode of GAMEMODES) {
         const targetName = regionChannelName(gamemode, region);
         let channel = interaction.guild.channels.cache.find(
           (c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === region
@@ -1700,18 +1708,13 @@ client.on("interactionCreate", async (interaction) => {
           await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
 
           // New queues start CLOSED — staff open them explicitly (the Open
-          // Queue button) when they're actually ready to test. No ping here
-          // since there's nothing to join yet.
+          // Queue button) when they're actually ready to test.
           suppressRealtimeFor(queueKey);
           await setQueueClosed(queueKey, true);
           await setQueueLocked(queueKey, false);
           await postFreshQueueMessage(channel, queueKey, gamemode);
         }
 
-        // Same for the high queue (LT3+) — its own tracked message in the
-        // same channel, also starting closed. Posted independently so
-        // re-running /setupqueues backfills it even if the regular queue
-        // message already existed from before this was added.
         if (!existingHighMsgInfo) {
           suppressRealtimeFor(highKey);
           await setQueueClosed(highKey, true);
@@ -1723,6 +1726,20 @@ client.on("interactionCreate", async (interaction) => {
       }
     }
 
+    // Clean up old gamemode-based categories (e.g. "Crystal Test", "UHC Test")
+    // now that all their channels have been moved to region categories.
+    // Only deletes them if empty — never touches non-queue categories.
+    const oldQueueCategoryNames = new Set(GAMEMODES.map((gm) => queueCategoryName(gm).toLowerCase()));
+    const cleanedCategories = [];
+    for (const [, ch] of interaction.guild.channels.cache) {
+      if (ch.type !== ChannelType.GuildCategory) continue;
+      if (!oldQueueCategoryNames.has(ch.name.toLowerCase())) continue;
+      const hasChildren = interaction.guild.channels.cache.some((c) => c.parentId === ch.id);
+      if (!hasChildren) {
+        await ch.delete().catch((err) => console.error(`[setupqueues] couldn't delete old category ${ch.name}:`, err.message));
+        cleanedCategories.push(ch.name);
+      }
+    }
     const lines = [];
     if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
     if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
@@ -1731,6 +1748,7 @@ client.on("interactionCreate", async (interaction) => {
     if (requestsCreated.length) lines.push(`**Requests/Staff channels created:** ${requestsCreated.map((n) => `#${n}`).join(", ")}`);
     if (deleted.length) lines.push(`**Deleted:** ${deleted.join(", ")}`);
     if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
+    if (cleanedCategories.length) lines.push(`**Old queue categories removed:** ${cleanedCategories.join(", ")}`);
     if (migratedAway.length) lines.push(`**Migrated away from (deleted, no region):** ${migratedAway.join(", ")}`);
     if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
     if (posted.length) lines.push(`**Posted a queue (closed) in:** ${posted.join(", ")}`);
@@ -1813,12 +1831,11 @@ client.on("interactionCreate", async (interaction) => {
             )
           );
 
-          const categoryName = queueCategoryName(gamemode);
           let category = interaction.guild.channels.cache.find(
-            (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
+            (c) => c.type === ChannelType.GuildCategory && c.name === region
           );
           if (!category) {
-            category = await interaction.guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory });
+            category = await interaction.guild.channels.create({ name: region, type: ChannelType.GuildCategory });
           }
           if (keep.parentId !== category.id) {
             await keep.setParent(category.id, { lockPermissions: false }).catch(() => {});
