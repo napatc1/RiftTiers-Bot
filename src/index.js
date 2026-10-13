@@ -236,8 +236,7 @@ async function lockChannelToTesters(guild, channel) {
 // somehow isn't around) — mentioned so players know where to chat instead.
 function buildWaitingListMessage(gamemodeDisplay, commandsChannel) {
   const commandsMention = commandsChannel ? `<#${commandsChannel.id}>` : "#commands";
-  return `@everyone
-**__${gamemodeDisplay} Tier Test__**
+  return `**__${gamemodeDisplay} Tier Test__**
 
 Being in the waitlist simply means that you are waiting to be tested at some point, it does not mean you are immediately going to be tested right away. Please be patient!
 
@@ -488,15 +487,17 @@ function buildApplicationReviewEmbed(app, statusLine = "") {
 }
 
 const APP_REVIEW_CHANNEL_ID = "1557858263503216710";
-const STAFF_APP_REVIEW_CHANNEL_ID = "1555516390822252654";
-const MEDIA_APP_REVIEW_CHANNEL_ID = "1556650541696946338";
+const STAFF_APP_REVIEW_CHANNEL_ID = "1557858263503216710";
+const MEDIA_APP_REVIEW_CHANNEL_ID = "1557858263503216710";
 const BOT_LOG_CHANNEL_ID = "1557858411193049239";
 
 async function sendBotLog(guild, content) {
   try {
     const ch = await guild.channels.fetch(BOT_LOG_CHANNEL_ID).catch(() => null);
     if (ch) await ch.send(content);
-  } catch {}
+  } catch (err) {
+    console.error("[botlog]", err.message);
+  }
 }
 
 function buildApplicationReviewButtons(type, applicationId) {
@@ -698,6 +699,11 @@ async function buildQueueEmbed(queueKey, gamemode) {
   if (closed) {
     return embed.setDescription(await closedCardDescription(queueKey));
   }
+  const active = getActiveTesting(queueKey);
+  if (active?.testeeId) {
+    const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
+    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
+  }
   return embed
     .setTitle(`${gamemode.toUpperCase()} ${region} Queue (${count})${locked ? " — LOCKED" : ""}`)
     .setDescription(
@@ -719,6 +725,11 @@ async function buildHighQueueEmbed(highKey, gamemode) {
     .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xff8a3d);
   if (closed) {
     return embed.setDescription(await closedCardDescription(highKey));
+  }
+  const active = getActiveTesting(highKey);
+  if (active?.testeeId) {
+    const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
+    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
   }
   return embed
     .setTitle(`${gamemode.toUpperCase()} ${region} HIGH Queue (${count})${locked ? " — LOCKED" : ""}`)
@@ -875,16 +886,17 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
   try {
     const queueChannel = await guild.channels.fetch(info.queueChannelId);
     const queueMessage = await queueChannel.messages.fetch(info.queueMessageId);
+    const baseKey = `${info.gamemode}:${info.region}`;
     if (info.isHigh) {
-      const highKey = `${info.gamemode}:high`;
+      const highKey = `${baseKey}:high`;
       await queueMessage.edit({
         embeds: [await buildHighQueueEmbed(highKey, info.gamemode)],
         components: await buildHighQueueButtons(highKey),
       });
     } else {
       await queueMessage.edit({
-        embeds: [await buildQueueEmbed(info.gamemode, info.gamemode)],
-        components: await buildQueueButtons(info.gamemode),
+        embeds: [await buildQueueEmbed(baseKey, info.gamemode)],
+        components: await buildQueueButtons(baseKey),
       });
     }
   } catch (err) {
@@ -1007,12 +1019,16 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
   await channel.send({
     content: `<@${testeeId}> <@${testerMember.id}>`,
     embeds: [
-      new EmbedBuilder()
-        .setTitle(`${gamemode.toUpperCase()} test in progress`)
-        .setDescription(
-          `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
-        )
-        .setColor(0xffd54a),
+      (() => {
+        const e = new EmbedBuilder()
+          .setTitle(`${gamemode.toUpperCase()} test in progress`)
+          .setDescription(
+            `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
+          )
+          .setColor(0xffd54a);
+        if (testeeUsername) e.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(testeeUsername)}/128`);
+        return e;
+      })(),
     ],
     components: [buildTicketButtons(gamemode, testeeId)],
   });
@@ -1119,6 +1135,7 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
     embeds: [
       new EmbedBuilder()
         .setDescription(desc)
+        .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
         .setColor(color)
         .setTimestamp(),
     ],
@@ -1388,355 +1405,15 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: "High tier rubric posted!" });
   }
 
-  // /setupqueues — one-time setup: creates any missing tiertest channels
-  // and posts a fresh queue message in every channel that doesn't already
-  // have one tracked. Safe to re-run after adding a new gamemode to
-  // GAMEMODE_CHANNELS — it only touches what's missing.
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "setupqueues") {
+  // /rebuildqueues — wipes every queue channel and queue category, then
+  // rebuilds from scratch: 5 region categories (NA/EU/AS/ME/AU), each
+  // containing one channel per gamemode. Touches ONLY queue channels and
+  // their categories — nothing else in the server is affected.
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "rebuildqueues") {
     if (!canManageCooldowns(interaction.member)) {
       return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
     }
-    const botMember = interaction.guild.members.me;
-    const missingPerms = [];
-    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) missingPerms.push("Manage Channels");
-    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) missingPerms.push("Manage Roles");
-    if (!botMember.permissions.has(PermissionsBitField.Flags.MentionEveryone)) missingPerms.push("Mention @everyone, @here, and All Roles");
-    if (missingPerms.length) {
-      return interaction.reply({
-        content: `I need the **${missingPerms.join("** and **")}** permission(s) to set this up. Grant them to my role and try again.`,
-        ephemeral: true,
-      });
-    }
-
-    await interaction.deferReply({ ephemeral: true });
-
-    // Ping roles first — channels below ping them immediately once posted.
-    const rolesCreated = [];
-    for (const roleName of Object.values(GAMEMODE_PING_ROLE_NAMES)) {
-      const exists = interaction.guild.roles.cache.find(
-        (r) => r.name.toLowerCase() === roleName.toLowerCase()
-      );
-      if (!exists) {
-        await interaction.guild.roles.create({ name: roleName, mentionable: true });
-        rolesCreated.push(roleName);
-      }
-    }
-
-    // Tier roles — one per (gamemode, tier) pair, e.g. "Crystal LT5",
-    // "UHC HT4". submit_result / /settier assign these automatically from
-    // then on (see assignTierRole in realtime-sync.js); this just makes
-    // sure every role exists up front.
-    let tierRolesCreatedCount = 0;
-    for (const gamemode of GAMEMODES) {
-      for (const tier of TIER_OPTIONS) {
-        const name = tierRoleName(gamemode, tier);
-        const exists = interaction.guild.roles.cache.find(
-          (r) => r.name.toLowerCase() === name.toLowerCase()
-        );
-        if (!exists) {
-          await interaction.guild.roles.create({ name, mentionable: false });
-          tierRolesCreatedCount++;
-        }
-      }
-    }
-
-    // Basic server channels (announcements/chat/commands/verify) under one
-    // shared "General" category. The verify-info embed is posted
-    // automatically the moment #verify is actually created, not on every
-    // re-run.
-    let generalCategory = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === GENERAL_CATEGORY_NAME.toLowerCase()
-    );
-    if (!generalCategory) {
-      generalCategory = await interaction.guild.channels.create({
-        name: GENERAL_CATEGORY_NAME,
-        type: ChannelType.GuildCategory,
-      });
-    }
-
-    const basicCreated = [];
-    const basicChannelsByName = {};
-    for (const spec of BASIC_CHANNELS) {
-      let channel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === spec.name
-      );
-      let justCreated = false;
-      if (!channel) {
-        const overwrites = spec.announcementsOnly
-          ? [{ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.SendMessages] }]
-          : [];
-        channel = await interaction.guild.channels.create({
-          name: spec.name,
-          type: ChannelType.GuildText,
-          parent: generalCategory.id,
-          permissionOverwrites: overwrites,
-        });
-        basicCreated.push(spec.name);
-        justCreated = true;
-      } else if (channel.parentId !== generalCategory.id) {
-        await channel.setParent(generalCategory.id, { lockPermissions: false }).catch(() => {});
-      }
-      basicChannelsByName[spec.name] = channel;
-
-      if (spec.name === "verify" && justCreated) {
-        await channel.send({ embeds: [buildVerifyInfoEmbed()] }).catch(() => {});
-      }
-    }
-    const commandsChannel = basicChannelsByName.commands || null;
-
-    // "Tierlist" category: reference channels (rubric, ruleset, punishments,
-    // leaderboard, results) separate from the per-gamemode queue categories.
-    // Migrates an existing "Testing" category from before this was renamed/
-    // expanded, instead of leaving a stray duplicate behind.
-    let tierlistCategory = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === TIERLIST_CATEGORY_NAME.toLowerCase()
-    );
-    if (!tierlistCategory) {
-      const oldCategory = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === OLD_TESTING_CATEGORY_NAME.toLowerCase()
-      );
-      if (oldCategory) {
-        tierlistCategory = await oldCategory.setName(TIERLIST_CATEGORY_NAME);
-      } else {
-        tierlistCategory = await interaction.guild.channels.create({
-          name: TIERLIST_CATEGORY_NAME,
-          type: ChannelType.GuildCategory,
-        });
-      }
-    }
-    const tierlistCreated = [];
-    for (const spec of TIERLIST_CHANNELS) {
-      let channel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === spec.name
-      );
-      let justCreated = false;
-      if (!channel) {
-        channel = await interaction.guild.channels.create({
-          name: spec.name,
-          type: ChannelType.GuildText,
-          parent: tierlistCategory.id,
-        });
-        tierlistCreated.push(spec.name);
-        justCreated = true;
-      } else if (channel.parentId !== tierlistCategory.id) {
-        await channel.setParent(tierlistCategory.id, { lockPermissions: false }).catch(() => {});
-      }
-      if (justCreated) {
-        if (spec.name === "ranked-rubric") await channel.send({ embeds: [buildTestingRubricEmbed()] }).catch(() => {});
-        if (spec.name === "ranked-ruleset") await channel.send({ embeds: [buildTestingRulesetEmbed()] }).catch(() => {});
-        if (spec.name === "punishments") await channel.send({ embeds: [buildPunishmentsEmbed()] }).catch(() => {});
-      }
-    }
-
-    // "Requests" category: public read-only entry points (queue picker,
-    // open-a-ticket, tester application) — each posts its embed/button(s)
-    // once, the first time that channel is created.
-    let requestsCategory = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === REQUESTS_CATEGORY_NAME.toLowerCase()
-    );
-    if (!requestsCategory) {
-      requestsCategory = await interaction.guild.channels.create({
-        name: REQUESTS_CATEGORY_NAME,
-        type: ChannelType.GuildCategory,
-      });
-    }
-    const requestsCreated = [];
-    const requestChannelSpecs = [
-      { name: REQUEST_TEST_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestTestEmbed()], components: [buildRequestTestSelect()] }) },
-      { name: REQUEST_HIGH_TEST_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestHighTestEmbed()], components: [buildRequestHighTestButton()] }) },
-      { name: REQUEST_SUPPORT_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildRequestSupportEmbed()], components: [buildOpenTicketButton()] }) },
-      { name: TESTER_APPLICATION_CHANNEL_NAME, post: async (ch) => ch.send({ embeds: [buildTesterApplicationEmbed()], components: [buildApplyButton()] }) },
-    ];
-    for (const spec of requestChannelSpecs) {
-      let channel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && c.name === spec.name
-      );
-      let justCreated = false;
-      if (!channel) {
-        channel = await interaction.guild.channels.create({
-          name: spec.name,
-          type: ChannelType.GuildText,
-          parent: requestsCategory.id,
-        });
-        requestsCreated.push(spec.name);
-        justCreated = true;
-      } else if (channel.parentId !== requestsCategory.id) {
-        await channel.setParent(requestsCategory.id, { lockPermissions: false }).catch(() => {});
-      }
-      // Read-only, same as tiertest channels — interact via the posted
-      // button/select menu, not by typing.
-      await lockChannelToTesters(interaction.guild, channel);
-      if (justCreated) await spec.post(channel).catch(() => {});
-    }
-
-    // "Staff" category: private review channel for tester applications.
-    let staffCategory = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === STAFF_CATEGORY_NAME.toLowerCase()
-    );
-    if (!staffCategory) {
-      const overwrites = [{ id: interaction.guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel] }];
-      for (const roleId of [PERMISSION_ROLE_IDS.manager, PERMISSION_ROLE_IDS.moderator, PERMISSION_ROLE_IDS.owner]) {
-        if (roleId) overwrites.push({ id: roleId, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] });
-      }
-      staffCategory = await interaction.guild.channels.create({
-        name: STAFF_CATEGORY_NAME,
-        type: ChannelType.GuildCategory,
-        permissionOverwrites: overwrites,
-      });
-    }
-    let reviewChannel = interaction.guild.channels.cache.find(
-      (c) => c.type === ChannelType.GuildText && c.name === TESTER_APP_REVIEW_CHANNEL_NAME
-    );
-    if (!reviewChannel) {
-      reviewChannel = await interaction.guild.channels.create({
-        name: TESTER_APP_REVIEW_CHANNEL_NAME,
-        type: ChannelType.GuildText,
-        parent: staffCategory.id,
-      });
-      requestsCreated.push(TESTER_APP_REVIEW_CHANNEL_NAME);
-    } else if (reviewChannel.parentId !== staffCategory.id) {
-      await reviewChannel.setParent(staffCategory.id, { lockPermissions: false }).catch(() => {});
-    }
-
-    // Delete Discord's default starter channels — replaced by the above.
-    const deleted = [];
-    for (const target of DEFAULT_CHANNELS_TO_REMOVE) {
-      const wantType = target.type === "voice" ? ChannelType.GuildVoice : ChannelType.GuildText;
-      const defaultChannel = interaction.guild.channels.cache.find(
-        (c) => c.type === wantType && c.name.toLowerCase() === target.name.toLowerCase()
-      );
-      if (defaultChannel && defaultChannel.id === interaction.channelId) {
-        deleted.push(`#${target.name} (${target.type}) — skipped, that's this channel; delete it manually`);
-      } else if (defaultChannel) {
-        await defaultChannel.delete().catch(() => {});
-        deleted.push(`#${target.name} (${target.type})`);
-      }
-    }
-
-    const created = [];
-    const categoriesCreated = [];
-    const posted = [];
-    const skipped = [];
-
-    const migratedAway = [];
-    for (const gamemode of GAMEMODES) {
-      const categoryName = queueCategoryName(gamemode);
-      let category = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
-      );
-      if (!category) {
-        category = await interaction.guild.channels.create({
-          name: categoryName,
-          type: ChannelType.GuildCategory,
-        });
-        categoriesCreated.push(categoryName);
-      }
-
-      // Clean up a leftover pre-region channel for this gamemode (e.g. the
-      // old single "💎-crystal-tiertest") — it's being replaced by one
-      // channel per region below, so there's nothing useful left in it.
-      const base = baseChannelName(gamemode);
-      const legacyChannel = interaction.guild.channels.cache.find(
-        (c) => c.type === ChannelType.GuildText && base && c.name.endsWith(base) && !parseChannelName(c.name)
-      );
-      if (legacyChannel) {
-        migratedAway.push(legacyChannel.name);
-        await legacyChannel.delete().catch((err) =>
-          console.error(`[setupqueues] couldn't delete legacy #${legacyChannel.name}:`, err.message)
-        );
-      }
-
-      for (const region of REGIONS) {
-        const targetName = regionChannelName(gamemode, region);
-        let channel = interaction.guild.channels.cache.find(
-          (c) => c.type === ChannelType.GuildText && gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === region
-        );
-        if (!channel) {
-          channel = await interaction.guild.channels.create({
-            name: targetName,
-            type: ChannelType.GuildText,
-            parent: category.id,
-          });
-          created.push(targetName);
-        } else if (channel.parentId !== category.id) {
-          await channel.setParent(category.id, { lockPermissions: false }).catch(() => {});
-        }
-
-        // Tiertest channels are read-only for everyone except testers and
-        // up — re-applied every run so it also catches channels set up
-        // before this existed.
-        await lockChannelToTesters(interaction.guild, channel);
-
-        const queueKey = `${gamemode}:${region}`;
-        const highKey = `${queueKey}:high`;
-        const existingMsgInfo = getQueueMessage(queueKey);
-        const existingHighMsgInfo = getQueueMessage(highKey);
-        if (existingMsgInfo && existingHighMsgInfo) {
-          skipped.push(targetName);
-          continue;
-        }
-
-        // Pinned-style explainer, pinging @everyone — posted once per
-        // channel alongside the queue message below.
-        if (!existingMsgInfo) {
-          const display = `${GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode} (${region})`;
-          await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
-
-          // New queues start CLOSED — staff open them explicitly (the Open
-          // Queue button) when they're actually ready to test. No ping here
-          // since there's nothing to join yet.
-          suppressRealtimeFor(queueKey);
-          await setQueueClosed(queueKey, true);
-          await setQueueLocked(queueKey, false);
-          await postFreshQueueMessage(channel, queueKey, gamemode);
-        }
-
-        // Same for the high queue (LT3+) — its own tracked message in the
-        // same channel, also starting closed. Posted independently so
-        // re-running /setupqueues backfills it even if the regular queue
-        // message already existed from before this was added.
-        if (!existingHighMsgInfo) {
-          suppressRealtimeFor(highKey);
-          await setQueueClosed(highKey, true);
-          await setQueueLocked(highKey, false);
-          await postFreshQueueMessage(channel, highKey, gamemode, { isHigh: true });
-        }
-
-        posted.push(targetName);
-      }
-    }
-
-    const lines = [];
-    if (rolesCreated.length) lines.push(`**Ping roles created:** ${rolesCreated.join(", ")}`);
-    if (tierRolesCreatedCount) lines.push(`**Tier roles created:** ${tierRolesCreatedCount}`);
-    if (basicCreated.length) lines.push(`**Basic channels created:** ${basicCreated.map((n) => `#${n}`).join(", ")}`);
-    if (tierlistCreated.length) lines.push(`**Tierlist channels created:** ${tierlistCreated.map((n) => `#${n}`).join(", ")}`);
-    if (requestsCreated.length) lines.push(`**Requests/Staff channels created:** ${requestsCreated.map((n) => `#${n}`).join(", ")}`);
-    if (deleted.length) lines.push(`**Deleted:** ${deleted.join(", ")}`);
-    if (categoriesCreated.length) lines.push(`**Categories created:** ${categoriesCreated.join(", ")}`);
-    if (migratedAway.length) lines.push(`**Migrated away from (deleted, no region):** ${migratedAway.join(", ")}`);
-    if (created.length) lines.push(`**Channels created:** ${created.join(", ")}`);
-    if (posted.length) lines.push(`**Posted a queue (closed) in:** ${posted.join(", ")}`);
-    if (skipped.length) lines.push(`**Already set up (skipped):** ${skipped.join(", ")}`);
-    return replyChunked(interaction, lines.length ? lines.join("\n") : "Nothing to do — everything's already set up.");
-  }
-
-  // /resetqueues — one-time cleanup for servers that ended up with
-  // duplicate tiertest channels and/or duplicate queue messages (this used
-  // to happen because the bot's queue-message tracking was in-memory only
-  // and forgot everything on restart — now persisted, see loadQueueMessages
-  // — and because re-running /setupqueues before the emoji-channel-name fix
-  // could create a second channel per gamemode instead of finding the
-  // first). For each gamemode: keeps exactly one tiertest channel (deleting
-  // any extras), renames it to its proper emoji name, purges every message
-  // in it, and re-posts exactly one fresh queue card (plus one high-queue
-  // card), both closed.
-  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "resetqueues") {
-    if (!canManageCooldowns(interaction.member)) {
-      return interaction.reply({ content: "Only testers, managers, or admins can do that.", ephemeral: true });
-    }
-    const botMember = interaction.guild.members.me;
-    if (!botMember.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
+    if (!interaction.guild.members.me.permissions.has(PermissionsBitField.Flags.ManageChannels)) {
       return interaction.reply({ content: "I need the **Manage Channels** permission to do this.", ephemeral: true });
     }
 
@@ -1747,110 +1424,87 @@ client.on("interactionCreate", async (interaction) => {
     );
 
     try {
-      // Delete leftover pre-region channels first (serial, few of these).
+      // 1. Suppress realtime for all queue keys for 5 minutes — the full
+      //    rebuild takes longer than the old 15 s default, which let
+      //    Supabase realtime fire mid-loop and post duplicate queue cards.
+      const REBUILD_SUPPRESS_MS = 5 * 60 * 1000;
       for (const gamemode of GAMEMODES) {
-        const base = baseChannelName(gamemode);
-        const legacyChannels = interaction.guild.channels.cache.filter(
-          (c) => c.type === ChannelType.GuildText && base && c.name.endsWith(base) && !parseChannelName(c.name)
-        );
-        for (const legacy of legacyChannels.values()) {
-          await legacy.delete().catch((err) => console.error(`[resetqueues] couldn't delete legacy #${legacy.name}:`, err.message));
+        for (const region of REGIONS) {
+          suppressRealtimeFor(`${gamemode}:${region}`, REBUILD_SUPPRESS_MS);
+          suppressRealtimeFor(`${gamemode}:${region}:high`, REBUILD_SUPPRESS_MS);
         }
       }
 
-      // Build the list of (gamemode, region) pairs to process.
-      const pairs = GAMEMODES.flatMap((gm) => REGIONS.map((r) => ({ gamemode: gm, region: r })));
-
-      // Pre-suppress realtime for every queue key we're about to write to,
-      // so the flood of setQueueClosed/setQueueLocked events doesn't trigger
-      // onQueueStateChange and double/triple-post cards into every channel.
-      for (const { gamemode, region } of pairs) {
-        suppressRealtimeFor(`${gamemode}:${region}`, 10000);
-        suppressRealtimeFor(`${gamemode}:${region}:high`, 10000);
+      // 2. Delete every existing queue channel (region-format names) and
+      //    every legacy pre-region queue channel.
+      const toDeleteChannels = interaction.guild.channels.cache.filter((c) => {
+        if (c.type !== ChannelType.GuildText) return false;
+        if (parseChannelName(c.name)) return true;
+        // legacy: ends with a base name and has no region suffix
+        return GAMEMODES.some((gm) => {
+          const base = baseChannelName(gm);
+          return base && c.name.endsWith(base);
+        });
+      });
+      for (const [, ch] of toDeleteChannels) {
+        await ch.delete().catch((err) => console.error(`[rebuildqueues] delete channel ${ch.name}:`, err.message));
       }
 
-      // Process all channels in parallel — purge, rename, repost.
-      const results = await Promise.all(
-        pairs.map(async ({ gamemode, region }) => {
-          const targetName = regionChannelName(gamemode, region);
-          const matches = [
-            ...interaction.guild.channels.cache
-              .filter(
-                (c) =>
-                  c.type === ChannelType.GuildText &&
-                  gamemodeForChannelName(c.name) === gamemode &&
-                  regionForChannelName(c.name) === region
-              )
-              .values(),
-          ];
-          if (matches.length === 0) {
-            return `**${gamemode} (${region})**: no channel found, skipped.`;
-          }
+      // 3. Delete queue categories: old gamemode-named ones AND region-named ones.
+      const queueCatNames = new Set([
+        ...GAMEMODES.map((gm) => queueCategoryName(gm).toLowerCase()),
+        ...REGIONS.map((r) => r.toLowerCase()),
+      ]);
+      // Re-fetch so the cache reflects deleted channels.
+      await interaction.guild.channels.fetch();
+      for (const [, ch] of interaction.guild.channels.cache) {
+        if (ch.type !== ChannelType.GuildCategory) continue;
+        if (!queueCatNames.has(ch.name.toLowerCase())) continue;
+        await ch.delete().catch((err) => console.error(`[rebuildqueues] delete category ${ch.name}:`, err.message));
+      }
 
-          matches.sort((a, b) => (a.name === targetName ? -1 : b.name === targetName ? 1 : 0));
-          const [keep, ...extras] = matches;
+      // 4. Create fresh region categories and all queue channels under them.
+      await interaction.guild.channels.fetch();
+      const created = [];
+      for (const region of REGIONS) {
+        const category = await interaction.guild.channels.create({
+          name: region,
+          type: ChannelType.GuildCategory,
+        });
 
-          await Promise.all(
-            extras.map((extra) =>
-              extra.delete().catch((err) => console.error(`[resetqueues] couldn't delete #${extra.name}:`, err.message))
-            )
-          );
-
-          const categoryName = queueCategoryName(gamemode);
-          let category = interaction.guild.channels.cache.find(
-            (c) => c.type === ChannelType.GuildCategory && c.name.toLowerCase() === categoryName.toLowerCase()
-          );
-          if (!category) {
-            category = await interaction.guild.channels.create({ name: categoryName, type: ChannelType.GuildCategory });
-          }
-          if (keep.parentId !== category.id) {
-            await keep.setParent(category.id, { lockPermissions: false }).catch(() => {});
-          }
-          if (keep.name !== targetName) {
-            await keep.setName(targetName).catch((err) => console.error(`[resetqueues] couldn't rename #${keep.name}:`, err.message));
-          }
-          await lockChannelToTesters(interaction.guild, keep);
-
-          // Purge all messages — bulkDelete handles up to 100 at a time for
-          // messages under 14 days; older ones are deleted one by one.
-          let purged = 0;
-          for (let i = 0; i < 20; i++) {
-            const batch = await keep.messages.fetch({ limit: 100 }).catch(() => null);
-            if (!batch || batch.size === 0) break;
-            const fresh = batch.filter((m) => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
-            if (fresh.size > 0) {
-              const result = await keep.bulkDelete(fresh, true).catch(() => null);
-              purged += result ? result.size : 0;
-              if (!result || result.size === 0) {
-                for (const m of batch.values()) { await m.delete().catch(() => {}); purged++; }
-                break;
-              }
-            } else {
-              for (const m of batch.values()) { await m.delete().catch(() => {}); purged++; }
-            }
-          }
+        for (const gamemode of GAMEMODES) {
+          const channel = await interaction.guild.channels.create({
+            name: regionChannelName(gamemode, region),
+            type: ChannelType.GuildText,
+            parent: category.id,
+          });
+          await lockChannelToTesters(interaction.guild, channel);
 
           const queueKey = `${gamemode}:${region}`;
           const highKey = `${queueKey}:high`;
           await deleteQueueMessage(queueKey);
           await deleteQueueMessage(highKey);
+          suppressRealtimeFor(queueKey, REBUILD_SUPPRESS_MS);
+          suppressRealtimeFor(highKey, REBUILD_SUPPRESS_MS);
           await setQueueClosed(queueKey, true);
           await setQueueLocked(queueKey, false);
           await setQueueClosed(highKey, true);
           await setQueueLocked(highKey, false);
 
+          // Clear any stale messages that survived a failed channel delete.
+          await channel.bulkDelete(100).catch(() => {});
+
           const display = `${GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode} (${region})`;
-          await keep.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
-          await postFreshQueueMessage(keep, queueKey, gamemode);
-          await postFreshQueueMessage(keep, highKey, gamemode, { isHigh: true });
+          await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
+          await postFreshQueueMessage(channel, queueKey, gamemode);
+          await postFreshQueueMessage(channel, highKey, gamemode, { isHigh: true });
+          created.push(channel.name);
+        }
+      }
 
-          return `**${gamemode} (${region})**: kept #${keep.name}${extras.length ? ` (deleted ${extras.length} extra)` : ""}, purged ${purged} msg${purged === 1 ? "" : "s"}.`;
-        })
-      );
-
-      return replyChunked(interaction, results.join("\n") || "Nothing to clean up.");
+      return replyChunked(interaction, `Queue channels rebuilt.\n**Created (${created.length}):** ${created.join(", ")}`);
     } catch (err) {
-      console.error("[resetqueues] failed:", err.message);
+      console.error("[rebuildqueues] failed:", err.message);
       return replyChunked(interaction, `Error: ${err.message}`);
     }
   }
@@ -1905,9 +1559,8 @@ client.on("interactionCreate", async (interaction) => {
     const { gamemode, region } = parsed;
     const queueKey = `${gamemode}:${region}`;
     const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
-    const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-      interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-    if (!isManagerPlus && tester?.region !== region) {
+    const { isManager, isOwner } = computeRoleFlags(interaction.member);
+    if (!isManager && !isOwner && tester?.region !== region) {
       return interaction.reply({
         content: tester?.region
           ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
@@ -2938,9 +2591,18 @@ client.on("interactionCreate", async (interaction) => {
       if (interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.media)) {
         return interaction.reply({ content: "You already have the Media role!", ephemeral: true });
       }
+      const DENY_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1000;
       const latestMedia = await getLatestMediaApplicationForUser(interaction.user.id);
       if (latestMedia?.status === "pending") {
         return interaction.reply({ content: "You already have a pending media application. Wait for staff to review it.", ephemeral: true });
+      }
+      if (latestMedia?.status === "denied" && latestMedia.reviewed_at) {
+        const deniedAt = new Date(latestMedia.reviewed_at).getTime();
+        const remaining = DENY_COOLDOWN_MS - (Date.now() - deniedAt);
+        if (remaining > 0) {
+          const daysLeft = Math.ceil(remaining / (24 * 60 * 60 * 1000));
+          return interaction.reply({ content: `Your last application was denied. You can apply again in **${daysLeft} day${daysLeft !== 1 ? "s" : ""}**.`, ephemeral: true });
+        }
       }
       return interaction.showModal(buildMediaApplicationModal());
     }
@@ -3156,9 +2818,8 @@ client.on("interactionCreate", async (interaction) => {
     // Returns the tester's own region string on success, or replies with an
     // error and returns null.
     async function requireOwnRegion(member, userId) {
-      const isManagerPlus = member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (isManagerPlus) return { ok: true };
+      const { isManager, isOwner } = computeRoleFlags(member);
+      if (isManager || isOwner) return { ok: true };
       const tester = await ensurePlayerForDiscordUser(userId, member.displayName);
       if (!tester?.region) {
         return {
@@ -3192,9 +2853,8 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (!isManagerPlus && joiner.region !== region) {
+      const { isManager, isOwner } = computeRoleFlags(interaction.member);
+      if (!isManager && !isOwner && joiner.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === joiner.region
         );
@@ -3269,14 +2929,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       const nowLocked = !(await getQueueLocked(queueKey));
       await setQueueLocked(queueKey, nowLocked);
       await refreshQueueMessage(interaction, queueKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: nowLocked ? "Queue locked to new joins." : "Queue unlocked.",
-        ephemeral: true,
       });
     }
 
@@ -3286,24 +2946,25 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       // Remove this tester from the active list first.
       await removeQueueTester(queueKey, interaction.user.id);
       const remaining = await getQueueTesterIds(queueKey);
       if (remaining.length > 0) {
         // Other testers still active — just refresh the card without closing.
-        await interaction.reply({ content: "You've stopped testing. The queue stays open for the other testers.", ephemeral: true });
         suppressRealtimeFor(queueKey);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        await interaction.editReply({ content: "You've stopped testing. The queue stays open for the other testers." });
       } else {
         // Last tester — fully close and wipe.
-        await interaction.reply({ content: "Closing the queue.", ephemeral: true });
         suppressRealtimeFor(queueKey);
         await setQueueClosed(queueKey, true);
         await setQueueLocked(queueKey, false);
         await clearQueueEntries(queueKey);
         await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        await interaction.editReply({ content: "Closing the queue." });
       }
       return;
     }
@@ -3343,6 +3004,7 @@ client.on("interactionCreate", async (interaction) => {
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
           gamemode,
+          region,
           isHigh: false,
         });
 
@@ -3418,9 +3080,8 @@ client.on("interactionCreate", async (interaction) => {
           content: "Set your region first — head to the website: <https://ryfttiers.pages.dev/Verify> before joining a queue.",
         });
       }
-      const isManagerPlus = interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.manager) ||
-        interaction.member.roles.cache.has(PERMISSION_ROLE_IDS.owner);
-      if (!isManagerPlus && player.region !== region) {
+      const { isManager, isOwner } = computeRoleFlags(interaction.member);
+      if (!isManager && !isOwner && player.region !== region) {
         const correctChannel = interaction.guild.channels.cache.find(
           (c) => gamemodeForChannelName(c.name) === gamemode && regionForChannelName(c.name) === player.region
         );
@@ -3489,14 +3150,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       const nowLocked = !(await getQueueLocked(highKey));
       await setQueueLocked(highKey, nowLocked);
       await refreshHighQueueMessage(interaction, highKey, gamemode);
-      return interaction.reply({
+      return interaction.editReply({
         content: nowLocked ? "High queue locked to new joins." : "High queue unlocked.",
-        ephemeral: true,
       });
     }
 
@@ -3504,21 +3165,22 @@ client.on("interactionCreate", async (interaction) => {
       if (!isTester(interaction.member)) {
         return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
       }
+      await interaction.deferReply({ ephemeral: true });
       const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.reply({ content: check.message, ephemeral: true });
+      if (!check.ok) return interaction.editReply({ content: check.message });
       await removeQueueTester(highKey, interaction.user.id);
       const remaining = await getQueueTesterIds(highKey);
       if (remaining.length > 0) {
-        await interaction.reply({ content: "You've stopped testing. The high queue stays open for the other testers.", ephemeral: true });
         suppressRealtimeFor(highKey);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+        await interaction.editReply({ content: "You've stopped testing. The high queue stays open for the other testers." });
       } else {
-        await interaction.reply({ content: "Closing this high queue.", ephemeral: true });
         suppressRealtimeFor(highKey);
         await setQueueClosed(highKey, true);
         await setQueueLocked(highKey, false);
         await clearQueueEntries(highKey);
         await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
+        await interaction.editReply({ content: "Closing this high queue." });
       }
       return;
     }
@@ -3557,6 +3219,7 @@ client.on("interactionCreate", async (interaction) => {
           queueChannelId: interaction.channelId,
           queueMessageId: interaction.message.id,
           gamemode,
+          region,
           isHigh: true,
         });
 
@@ -3933,6 +3596,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    await interaction.deferReply();
     try {
       const existingPlayer = await getPlayer(name);
       const previousTier = existingPlayer?.tiers?.[gamemode];
@@ -3941,7 +3605,7 @@ client.on("interactionCreate", async (interaction) => {
       if (testeeId) {
         await setCooldown(gamemode, testeeId, Date.now() + COOLDOWN_MS);
       }
-      await interaction.reply({
+      await interaction.editReply({
         content: `Saved: **${name}** is now **${tier}** in **${gamemode}**. The website will update automatically. They're on a ${COOLDOWN_DAYS}-day cooldown for this gamemode. Closing this ticket in 5 seconds...`,
       });
       const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
@@ -3960,6 +3624,7 @@ client.on("interactionCreate", async (interaction) => {
                 .setDescription(
                   `**${name}**${testeeId ? ` (<@${testeeId}>)` : ""} in **${gamemode.toUpperCase()}**: ${changeText}\nRegion: ${region}\nTested by: <@${interaction.user.id}>`
                 )
+                .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(name)}/128`)
                 .setColor(0xffd54a),
             ],
           });
@@ -4015,9 +3680,8 @@ client.on("interactionCreate", async (interaction) => {
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
-      return interaction.reply({
+      return interaction.editReply({
         content: "Something went wrong saving that to the database.",
-        ephemeral: true,
       });
     }
   }
@@ -4255,17 +3919,17 @@ client.once("ready", async () => {
 // Fires whenever a member's roles (or anything else) change — keeps the
 // website's permission flags current the moment staff are promoted/demoted.
 client.on("guildMemberUpdate", (_oldMember, newMember) => {
-  syncMemberRoles(newMember);
+  syncMemberRoles(newMember).catch((err) => console.error("[guildMemberUpdate]", err.message));
 });
 
 // Relays staff replies typed directly in a ticket channel back to the
 // website (handleTicketChannelMessage no-ops instantly for any other
 // channel, so this is cheap to call for every message).
 client.on("messageCreate", async (message) => {
-  handleTicketChannelMessage(message);
+  handleTicketChannelMessage(message).catch((err) => console.error("[handleTicketChannelMessage]", err.message));
   // Mirror test channel messages (from any non-bot sender) to test_messages
   // so the website chat panel can display them in real time.
-  handleTestChannelMessage(message);
+  handleTestChannelMessage(message).catch((err) => console.error("[handleTestChannelMessage]", err.message));
 
   // --- ! prefix economy commands ---
   if (!message.author.bot && message.content.startsWith("!")) {
