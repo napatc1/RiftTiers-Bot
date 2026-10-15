@@ -693,122 +693,254 @@ async function closedCardDescription(queueKey) {
   );
 }
 
-async function buildQueueEmbed(queueKey, gamemode) {
+// ── Queue card image generation ──────────────────────────────────────────────
+// Draws a PNG queue card and returns an AttachmentBuilder ready to send.
+
+async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false } = {}) {
   const region = regionFromQueueKey(queueKey);
-  const [closed, locked, count, testerIds, queueText] = await Promise.all([
+  const [closed, locked, count, testerIds, queuePlayerIds] = await Promise.all([
     isQueueClosed(queueKey),
     getQueueLocked(queueKey),
     getQueueCount(queueKey),
     getQueueTesterIds(queueKey),
-    formatQueue(queueKey),
+    getQueuePlayerIds(queueKey),
   ]);
 
-  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
-  const gmEmoji = GAMEMODE_EMOJIS[gamemode] || "🎮";
+  const display = (GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode).toUpperCase();
 
-  const embed = new EmbedBuilder()
-    .setAuthor({ name: "RyftTiers", iconURL: client.user?.displayAvatarURL() })
-    .setTitle(`${gmEmoji}  ${display} — ${region}`)
-    .setColor(closed ? 0x2b2d31 : locked ? 0xe67e22 : 0x57f287);
-
-  if (closed) {
-    const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
-    const ts = lastOpenedAt
-      ? `<t:${Math.floor(new Date(lastOpenedAt).getTime() / 1000)}:F>`
-      : "Hasn't been opened yet";
-    return embed.setDescription(
-      `## ⛔  No Testers Online\nNo testers are available right now. You'll be pinged here the moment a tester opens the queue.\n\n**Last session:** ${ts}`
-    );
+  async function resolveName(id) {
+    try { return (await guild.members.fetch(id)).displayName; } catch { return `...`; }
   }
+
+  const [testerNames, queueNames] = await Promise.all([
+    Promise.all(testerIds.map(resolveName)),
+    Promise.all(queuePlayerIds.map(resolveName)),
+  ]);
 
   const active = getActiveTesting(queueKey);
-  if (active?.testeeId) {
+  let activeTesteeName = null;
+  let headImg = null;
+  if (!closed && active?.testeeId) {
+    activeTesteeName = await resolveName(active.testeeId);
     const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
-    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
+    if (ign) headImg = await loadImage(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/64`).catch(() => null);
   }
 
-  const testerValue = testerIds.length > 0
-    ? testerIds.map((id, i) => `\`${i + 1}.\` <@${id}>`).join("\n")
-    : "_None online_";
+  let lastSessionText = null;
+  if (closed) {
+    const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
+    if (lastOpenedAt) {
+      const d = new Date(lastOpenedAt);
+      lastSessionText = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+        + " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    } else {
+      lastSessionText = "Never opened";
+    }
+  }
 
-  if (active?.testeeId) {
-    embed.addFields(
-      { name: "🎯  Currently Testing", value: `<@${active.testeeId}>`, inline: true },
-      { name: "👥  Active Testers", value: testerValue, inline: true }
-    );
+  // ── Layout constants ──
+  const W = 520;
+  const PAD = 22;
+  const ACCENT = 5;
+  const HEADER_H = 68;
+  const SEC_LABEL_H = 36;
+  const ROW_H = 30;
+  const HEAD_SIZE = 48;
+  const SEC_GAP = 10;
+  const BOTTOM_PAD = 18;
+
+  const accentColor = closed ? "#3d3f45" : isHigh ? "#f1c40f" : locked ? "#e67e22" : "#57f287";
+  const statusLabel = closed ? "OFFLINE" : locked ? "LOCKED" : "OPEN";
+  const statusBg    = closed ? "#3d3f45" : locked ? "#e67e22" : "#57f287";
+  const statusFg    = (closed || locked) ? "#ffffff" : "#000000";
+
+  // Calculate total height
+  let contentH = HEADER_H + SEC_GAP;
+  if (closed) {
+    contentH += SEC_LABEL_H + ROW_H * 2 + SEC_GAP; // "No Testers Online" + last session
   } else {
-    embed.addFields({ name: "👥  Active Testers", value: testerValue });
+    contentH += SEC_LABEL_H + Math.max(testerIds.length, 1) * ROW_H + SEC_GAP; // testers
+    if (activeTesteeName) contentH += SEC_LABEL_H + HEAD_SIZE + 10 + SEC_GAP; // testing
+    contentH += SEC_LABEL_H + Math.max(count, 1) * ROW_H + SEC_GAP; // queue
+    if (isHigh) contentH += 28; // LT3 footer
   }
+  const H = contentH + BOTTOM_PAD;
 
-  const queueValue = queueText.replace(/^\*\*Queue\*\*\n/, "");
-  embed.addFields(
-    { name: "​", value: "​" },
-    { name: `📋  Queue — ${count} player${count !== 1 ? "s" : ""} waiting`, value: queueValue || "_Queue is empty_" }
-  );
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
 
-  if (locked) embed.setFooter({ text: "🔒  Locked — not accepting new joins right now" });
+  // Background
+  ctx.fillStyle = "#1e1f22";
+  ctx.fillRect(0, 0, W, H);
 
-  return embed;
-}
+  // Accent bar
+  ctx.fillStyle = accentColor;
+  ctx.fillRect(0, 0, ACCENT, H);
 
-async function buildHighQueueEmbed(highKey, gamemode) {
-  const region = regionFromQueueKey(highKey);
-  const [closed, locked, count, testerIds, queueText] = await Promise.all([
-    isQueueClosed(highKey),
-    getQueueLocked(highKey),
-    getQueueCount(highKey),
-    getQueueTesterIds(highKey),
-    formatQueue(highKey),
-  ]);
+  // Header background
+  ctx.fillStyle = "#2b2d31";
+  ctx.fillRect(ACCENT, 0, W - ACCENT, HEADER_H);
 
-  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
-  const gmEmoji = GAMEMODE_EMOJIS[gamemode] || "🎮";
+  // Gamemode + region title
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 22px sans-serif";
+  ctx.fillText(`${display}  —  ${region}${isHigh ? "  ★ HIGH" : ""}`, ACCENT + PAD, 30);
 
-  const embed = new EmbedBuilder()
-    .setAuthor({ name: "RyftTiers", iconURL: client.user?.displayAvatarURL() })
-    .setTitle(`${gmEmoji}  ${display} — ${region}  ⭐ High Queue`)
-    .setColor(closed ? 0x2b2d31 : locked ? 0xe67e22 : 0xf1c40f);
+  // Subtitle
+  ctx.fillStyle = "#949ba4";
+  ctx.font = "14px sans-serif";
+  ctx.fillText("RyftTiers Queue", ACCENT + PAD, 52);
+
+  // Status badge
+  const badgeText = statusLabel;
+  ctx.font = "bold 12px sans-serif";
+  const badgeW = ctx.measureText(badgeText).width + 18;
+  const badgeX = W - PAD - badgeW;
+  const badgeY = 16;
+  const badgeH = 24;
+  ctx.fillStyle = statusBg;
+  roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 5);
+  ctx.fill();
+  ctx.fillStyle = statusFg;
+  ctx.textAlign = "center";
+  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + 16);
+  ctx.textAlign = "left";
+
+  // ── Content sections ──
+  let y = HEADER_H + SEC_GAP;
+
+  function drawSection(label, rows) {
+    // Section label
+    ctx.fillStyle = "#949ba4";
+    ctx.font = "bold 11px sans-serif";
+    ctx.fillText(label, ACCENT + PAD, y + 14);
+    // Thin separator line
+    ctx.strokeStyle = "#3d3f45";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ACCENT + PAD + ctx.measureText(label).width + 10, y + 10);
+    ctx.lineTo(W - PAD, y + 10);
+    ctx.stroke();
+    y += SEC_LABEL_H;
+    for (const row of rows) {
+      row();
+      y += ROW_H;
+    }
+    y += SEC_GAP;
+  }
 
   if (closed) {
-    const lastOpenedAt = await getQueueLastOpenedAt(highKey);
-    const ts = lastOpenedAt
-      ? `<t:${Math.floor(new Date(lastOpenedAt).getTime() / 1000)}:F>`
-      : "Hasn't been opened yet";
-    return embed.setDescription(
-      `## ⛔  No Testers Online\nNo testers are available right now. You'll be pinged here the moment a tester opens the high queue.\n\n**Last session:** ${ts}`
-    );
-  }
-
-  const active = getActiveTesting(highKey);
-  if (active?.testeeId) {
-    const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
-    if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
-  }
-
-  const testerValue = testerIds.length > 0
-    ? testerIds.map((id, i) => `\`${i + 1}.\` <@${id}>`).join("\n")
-    : "_None online_";
-
-  if (active?.testeeId) {
-    embed.addFields(
-      { name: "🎯  Currently Testing", value: `<@${active.testeeId}>`, inline: true },
-      { name: "👥  Active Testers", value: testerValue, inline: true }
-    );
+    // Closed state
+    ctx.fillStyle = "#f04747";
+    ctx.font = "bold 20px sans-serif";
+    ctx.fillText("No Testers Online", ACCENT + PAD, y + 24);
+    y += 40;
+    ctx.fillStyle = "#949ba4";
+    ctx.font = "14px sans-serif";
+    ctx.fillText("Testers will ping here when the queue opens.", ACCENT + PAD, y);
+    y += ROW_H;
+    if (lastSessionText) {
+      ctx.fillStyle = "#6d6f78";
+      ctx.font = "13px sans-serif";
+      ctx.fillText(`Last session:  ${lastSessionText}`, ACCENT + PAD, y);
+    }
   } else {
-    embed.addFields({ name: "👥  Active Testers", value: testerValue });
+    // Active Testers
+    drawSection("ACTIVE TESTERS", testerIds.length > 0
+      ? testerIds.map((_, i) => () => {
+          ctx.fillStyle = "#949ba4";
+          ctx.font = "bold 13px sans-serif";
+          ctx.fillText(`${i + 1}.`, ACCENT + PAD, y + 19);
+          ctx.fillStyle = "#dbdee1";
+          ctx.font = "15px sans-serif";
+          ctx.fillText(testerNames[i], ACCENT + PAD + 24, y + 19);
+        })
+      : [() => {
+          ctx.fillStyle = "#6d6f78";
+          ctx.font = "italic 14px sans-serif";
+          ctx.fillText("None online", ACCENT + PAD, y + 19);
+        }]
+    );
+
+    // Currently Testing
+    if (activeTesteeName) {
+      ctx.fillStyle = "#949ba4";
+      ctx.font = "bold 11px sans-serif";
+      ctx.fillText("CURRENTLY TESTING", ACCENT + PAD, y + 14);
+      ctx.strokeStyle = "#3d3f45";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ACCENT + PAD + ctx.measureText("CURRENTLY TESTING").width + 10, y + 10);
+      ctx.lineTo(W - PAD, y + 10);
+      ctx.stroke();
+      y += SEC_LABEL_H;
+
+      if (headImg) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(ACCENT + PAD + HEAD_SIZE / 2, y + HEAD_SIZE / 2, HEAD_SIZE / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(headImg, ACCENT + PAD, y, HEAD_SIZE, HEAD_SIZE);
+        ctx.restore();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 17px sans-serif";
+        ctx.fillText(activeTesteeName, ACCENT + PAD + HEAD_SIZE + 14, y + HEAD_SIZE / 2 + 6);
+      } else {
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 17px sans-serif";
+        ctx.fillText(activeTesteeName, ACCENT + PAD, y + 24);
+      }
+      y += HEAD_SIZE + 10 + SEC_GAP;
+    }
+
+    // Queue
+    const queueLabel = count > 0 ? `QUEUE — ${count} WAITING` : "QUEUE";
+    drawSection(queueLabel, count > 0
+      ? queuePlayerIds.map((_, i) => () => {
+          ctx.fillStyle = "#949ba4";
+          ctx.font = "bold 13px sans-serif";
+          ctx.fillText(`${i + 1}.`, ACCENT + PAD, y + 19);
+          ctx.fillStyle = "#dbdee1";
+          ctx.font = "15px sans-serif";
+          ctx.fillText(queueNames[i], ACCENT + PAD + 24, y + 19);
+        })
+      : [() => {
+          ctx.fillStyle = "#6d6f78";
+          ctx.font = "italic 14px sans-serif";
+          ctx.fillText("Empty — join with the button below", ACCENT + PAD, y + 19);
+        }]
+    );
+
+    // High queue note
+    if (isHigh) {
+      const noteY = H - BOTTOM_PAD - 14;
+      ctx.fillStyle = "#f1c40f";
+      ctx.font = "12px sans-serif";
+      ctx.fillText(locked ? "★ LT3+ only  •  Locked — not accepting new joins" : "★ LT3+ players only", ACCENT + PAD, noteY);
+    } else if (locked) {
+      const noteY = H - BOTTOM_PAD - 14;
+      ctx.fillStyle = "#e67e22";
+      ctx.font = "12px sans-serif";
+      ctx.fillText("Locked — not accepting new joins right now", ACCENT + PAD, noteY);
+    }
   }
 
-  const queueValue = queueText.replace(/^\*\*Queue\*\*\n/, "");
-  embed.addFields(
-    { name: "​", value: "​" },
-    { name: `📋  Queue — ${count} player${count !== 1 ? "s" : ""} waiting`, value: queueValue || "_Queue is empty_" }
-  );
+  const buf = canvas.toBuffer("image/png");
+  return new AttachmentBuilder(buf, { name: "queue.png" });
+}
 
-  const footerParts = ["⭐ LT3+ players only"];
-  if (locked) footerParts.push("🔒 Locked — not accepting new joins");
-  embed.setFooter({ text: footerParts.join("  •  ") });
-
-  return embed;
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
 }
 
 // Main queue message. Closed: a single "Open Queue" button (testers only).
@@ -889,14 +1021,18 @@ function buildTicketButtons(gamemode, testeeId) {
 
 async function refreshQueueMessage(interaction, queueKey, gamemode) {
   await interaction.message.edit({
-    embeds: [await buildQueueEmbed(queueKey, gamemode)],
+    files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)],
+    attachments: [],
+    embeds: [],
     components: await buildQueueButtons(queueKey),
   });
 }
 
 async function refreshHighQueueMessage(interaction, highKey, gamemode) {
   await interaction.message.edit({
-    embeds: [await buildHighQueueEmbed(highKey, gamemode)],
+    files: [await buildQueueAttachment(highKey, gamemode, interaction.guild, { isHigh: true })],
+    attachments: [],
+    embeds: [],
     components: await buildHighQueueButtons(highKey),
   });
 }
@@ -935,11 +1071,11 @@ async function postFreshQueueMessage(channel, queueKey, gamemode, { isHigh = fal
       console.error("[postFreshQueueMessage] couldn't delete old message:", err.message);
     }
   }
-  const embed = isHigh ? await buildHighQueueEmbed(queueKey, gamemode) : await buildQueueEmbed(queueKey, gamemode);
+  const attachment = await buildQueueAttachment(queueKey, gamemode, channel.guild, { isHigh });
   const components = isHigh ? await buildHighQueueButtons(queueKey) : await buildQueueButtons(queueKey);
   const newMessage = await channel.send({
     content: content || undefined,
-    embeds: [embed],
+    files: [attachment],
     components,
   });
   await setQueueMessage(queueKey, channel.id, newMessage.id);
@@ -961,12 +1097,16 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
     if (info.isHigh) {
       const highKey = `${baseKey}:high`;
       await queueMessage.edit({
-        embeds: [await buildHighQueueEmbed(highKey, info.gamemode)],
+        files: [await buildQueueAttachment(highKey, info.gamemode, guild, { isHigh: true })],
+        attachments: [],
+        embeds: [],
         components: await buildHighQueueButtons(highKey),
       });
     } else {
       await queueMessage.edit({
-        embeds: [await buildQueueEmbed(baseKey, info.gamemode)],
+        files: [await buildQueueAttachment(baseKey, info.gamemode, guild)],
+        attachments: [],
+        embeds: [],
         components: await buildQueueButtons(baseKey),
       });
     }
@@ -1576,7 +1716,6 @@ client.on("interactionCreate", async (interaction) => {
           const display = `${GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode} (${region})`;
           await channel.send({ content: buildWaitingListMessage(display, commandsChannel) }).catch(() => {});
           await postFreshQueueMessage(channel, queueKey, gamemode);
-          await postFreshQueueMessage(channel, highKey, gamemode, { isHigh: true });
           created.push(channel.name);
         }
       }
@@ -1683,7 +1822,7 @@ client.on("interactionCreate", async (interaction) => {
         const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
         const queueMessage = await queueChannel.messages.fetch(stored.messageId);
         await queueMessage.edit({
-          embeds: [await buildQueueEmbed(queueKey, gamemode)],
+          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
           components: await buildQueueButtons(queueKey),
         });
       }
@@ -1743,7 +1882,7 @@ client.on("interactionCreate", async (interaction) => {
         const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
         const queueMessage = await queueChannel.messages.fetch(stored.messageId);
         await queueMessage.edit({
-          embeds: [await buildQueueEmbed(queueKey, gamemode)],
+          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
           components: await buildQueueButtons(queueKey),
         });
       }
@@ -1793,7 +1932,7 @@ client.on("interactionCreate", async (interaction) => {
         const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
         const queueMsg = await queueChannel.messages.fetch(stored.messageId);
         await queueMsg.edit({
-          embeds: [await buildQueueEmbed(queueKey, gamemode)],
+          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
           components: await buildQueueButtons(queueKey),
         });
       }
@@ -3930,6 +4069,8 @@ client.once("ready", async () => {
         const [gamemode, region, maybeHigh] = queueKey.split(":");
         const isHigh = maybeHigh === "high";
         if (!gamemode || !region) return;
+        // High queue cards are no longer posted in tier-test channels.
+        if (isHigh) return;
 
         // Find the tiertest channel matching both the gamemode AND region.
         const channel = g.channels.cache.find(
