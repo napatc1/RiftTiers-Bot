@@ -17,7 +17,9 @@ const {
   Routes,
   Partials,
   StringSelectMenuBuilder,
+  AttachmentBuilder,
 } = require("discord.js");
+const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const commands = require("./commands");
 const {
   GAMEMODE_CHANNELS,
@@ -80,6 +82,7 @@ const {
   getQueueCount,
   getQueuePosition,
   formatQueue,
+  getQueuePlayerIds,
   isQueueClosed,
   setQueueClosed,
   getQueueLocked,
@@ -139,6 +142,7 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   // Lets messageUpdate/messageDelete still fire (as partials) for messages
   // that fell out of the cache, so edits/deletes keep mirroring to the
@@ -159,6 +163,10 @@ const managerRoleNames = (process.env.MANAGER_ROLE_NAMES || "Manager")
 function isRestricted(member) {
   return member.roles.cache.has(RESTRICTED_ROLE_ID);
 }
+
+// Maps screenshare voice channel ID -> ticket text channel ID so we can
+// delete the VC when the ticket closes, and clean up when it goes empty.
+const screenshareVCs = new Map();
 
 function isTester(member) {
   return member.roles.cache.some((r) =>
@@ -1107,6 +1115,14 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
         .send({ content: "This ticket has been open for 2 hours with no result submitted — closing it automatically." })
         .catch(() => {});
       await clearActiveTestingAndRefresh(guild, channel.id);
+      // Clean up screenshare VC if one was created for this ticket.
+      for (const [vcId, ticketId] of screenshareVCs) {
+        if (ticketId === channel.id) {
+          screenshareVCs.delete(vcId);
+          guild.channels.fetch(vcId).then((vc) => vc?.delete()).catch(() => {});
+          break;
+        }
+      }
       await channel.delete().catch((err) => console.error("Failed to auto-delete stale ticket:", err.message));
     } catch (err) {
       console.error("Error during ticket auto-close:", err.message);
@@ -2863,7 +2879,90 @@ client.on("interactionCreate", async (interaction) => {
       }
       await interaction.reply({ content: "Closing ticket without saving a result..." });
       await clearActiveTestingAndRefresh(interaction.guild, interaction.channelId);
+      // Delete any screenshare VC tied to this ticket.
+      for (const [vcId, ticketId] of screenshareVCs) {
+        if (ticketId === interaction.channelId) {
+          screenshareVCs.delete(vcId);
+          interaction.guild.channels.fetch(vcId).then((vc) => vc?.delete()).catch(() => {});
+          break;
+        }
+      }
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (close):", err.message)), 3000);
+      return;
+    }
+
+    // /screenshare — create a private voice channel for the current test ticket
+    if (interaction.isChatInputCommand() && interaction.commandName === "screenshare") {
+      if (!interaction.channel.name.startsWith("ticket-")) {
+        return interaction.reply({ content: "Run `/screenshare` inside a test ticket channel.", ephemeral: true });
+      }
+
+      const activeInfo = getActiveTestingByTicket(interaction.channelId);
+      const isTestee = activeInfo?.testeeId === interaction.user.id;
+      if (!isTester(interaction.member) && !isTestee) {
+        return interaction.reply({ content: "Only testers or the player being tested can use this.", ephemeral: true });
+      }
+
+      // Check if a VC already exists for this ticket.
+      for (const [vcId, ticketId] of screenshareVCs) {
+        if (ticketId === interaction.channelId) {
+          const existing = interaction.guild.channels.cache.get(vcId);
+          if (existing) {
+            return interaction.reply({ content: `A screenshare VC already exists: ${existing}`, ephemeral: true });
+          }
+          screenshareVCs.delete(vcId);
+        }
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const guild = interaction.guild;
+        const testerRoles = getTesterRoles(guild);
+
+        const overwrites = [
+          { id: guild.roles.everyone.id, deny: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] },
+          ...testerRoles.map((role) => ({
+            id: role.id,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.Connect,
+              PermissionsBitField.Flags.Speak,
+              PermissionsBitField.Flags.Stream,
+              PermissionsBitField.Flags.UseEmbeddedActivities,
+            ],
+          })),
+        ];
+
+        // Also allow the testee explicitly.
+        if (activeInfo?.testeeId) {
+          overwrites.push({
+            id: activeInfo.testeeId,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.Connect,
+              PermissionsBitField.Flags.Speak,
+              PermissionsBitField.Flags.Stream,
+              PermissionsBitField.Flags.UseEmbeddedActivities,
+            ],
+          });
+        }
+
+        const vc = await guild.channels.create({
+          name: `screenshare-${interaction.channel.name.replace(/^ticket-/, "")}`,
+          type: ChannelType.GuildVoice,
+          parent: interaction.channel.parentId,
+          permissionOverwrites: overwrites,
+          userLimit: 10,
+        });
+
+        screenshareVCs.set(vc.id, interaction.channelId);
+
+        await interaction.channel.send({ content: `🎥 Screenshare VC created: ${vc} — only testers and the testee can join. Auto-deletes when empty.` });
+        await interaction.editReply({ content: "Voice channel created." });
+      } catch (err) {
+        console.error("[screenshare] failed:", err.message);
+        await interaction.editReply({ content: "Something went wrong creating the voice channel." });
+      }
       return;
     }
 
@@ -3740,6 +3839,14 @@ client.on("interactionCreate", async (interaction) => {
         console.error("[economy] coin award failed:", e.message);
       }
 
+      // Delete any screenshare VC tied to this ticket.
+      for (const [vcId, ticketId] of screenshareVCs) {
+        if (ticketId === interaction.channelId) {
+          screenshareVCs.delete(vcId);
+          interaction.guild.channels.fetch(vcId).then((vc) => vc?.delete()).catch(() => {});
+          break;
+        }
+      }
       setTimeout(() => interaction.channel.delete().catch((err) => console.error("Failed to delete ticket channel (submit):", err.message)), 5000);
     } catch (err) {
       console.error(err);
@@ -4222,6 +4329,18 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 
 client.on("messageDelete", (message) => {
   handleTicketChannelMessageDelete(message);
+});
+
+// Auto-delete screenshare VCs when they go empty.
+client.on("voiceStateUpdate", (_oldState, newState) => {
+  const channelId = newState.channelId ?? _oldState.channelId;
+  if (!channelId || !screenshareVCs.has(channelId)) return;
+  const vc = newState.guild.channels.cache.get(channelId);
+  if (!vc) { screenshareVCs.delete(channelId); return; }
+  if (vc.members.size === 0) {
+    screenshareVCs.delete(channelId);
+    vc.delete().catch(() => {});
+  }
 });
 
 // Catch anything that slips through interaction handling so a single bad

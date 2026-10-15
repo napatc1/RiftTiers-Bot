@@ -219,6 +219,10 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("screenshare")
+    .setDescription("Create a private voice channel for screensharing in this test ticket. Run inside a ticket channel."),
+
+  new SlashCommandBuilder()
     .setName("announce")
     .setDescription("Post an announcement to #announcements and the website. (Managers/owners only)")
     .addStringOption((opt) =>
