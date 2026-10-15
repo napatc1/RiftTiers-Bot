@@ -312,6 +312,16 @@ async function formatQueue(queueKey) {
   return "**Queue**\n" + data.map((e, i) => `${i + 1}. <@${e.players.discord_id}>`).join("\n");
 }
 
+async function getQueuePlayerIds(queueKey) {
+  const { data } = await supabase
+    .from("queue_entries")
+    .select("players!queue_entries_player_id_fkey(discord_id)")
+    .eq("gamemode", queueKey)
+    .order("joined_at", { ascending: true });
+  if (!data || data.length === 0) return [];
+  return data.map((e) => e.players.discord_id);
+}
+
 async function isQueueClosed(queueKey) {
   const { data } = await supabase
     .from("queue_closed")
@@ -847,6 +857,7 @@ module.exports = {
   getQueueCount,
   getQueuePosition,
   formatQueue,
+  getQueuePlayerIds,
   isQueueClosed,
   setQueueClosed,
   getQueueLocked,
