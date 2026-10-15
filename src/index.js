@@ -49,6 +49,7 @@ const {
   gamemodeForChannelName,
   regionForChannelName,
   RESTRICTED_ROLE_ID,
+  GAMEMODE_EMOJIS,
   COIN_REWARDS,
   MILESTONE_TIERS,
   SHOP_ITEMS,
@@ -686,58 +687,120 @@ async function closedCardDescription(queueKey) {
 
 async function buildQueueEmbed(queueKey, gamemode) {
   const region = regionFromQueueKey(queueKey);
-  const [closed, locked, count, testersBlock, queueText] = await Promise.all([
+  const [closed, locked, count, testerIds, queueText] = await Promise.all([
     isQueueClosed(queueKey),
     getQueueLocked(queueKey),
     getQueueCount(queueKey),
-    activeTestersBlock(queueKey),
+    getQueueTesterIds(queueKey),
     formatQueue(queueKey),
   ]);
+
+  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
+  const gmEmoji = GAMEMODE_EMOJIS[gamemode] || "🎮";
+
   const embed = new EmbedBuilder()
-    .setAuthor(queueAuthor(gamemode, region))
-    .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xffd54a);
+    .setAuthor({ name: "RyftTiers", iconURL: client.user?.displayAvatarURL() })
+    .setTitle(`${gmEmoji}  ${display} — ${region}`)
+    .setColor(closed ? 0x2b2d31 : locked ? 0xe67e22 : 0x57f287);
+
   if (closed) {
-    return embed.setDescription(await closedCardDescription(queueKey));
+    const lastOpenedAt = await getQueueLastOpenedAt(queueKey);
+    const ts = lastOpenedAt
+      ? `<t:${Math.floor(new Date(lastOpenedAt).getTime() / 1000)}:F>`
+      : "Hasn't been opened yet";
+    return embed.setDescription(
+      `## ⛔  No Testers Online\nNo testers are available right now. You'll be pinged here the moment a tester opens the queue.\n\n**Last session:** ${ts}`
+    );
   }
+
   const active = getActiveTesting(queueKey);
   if (active?.testeeId) {
     const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
     if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
   }
-  return embed
-    .setTitle(`${gamemode.toUpperCase()} ${region} Queue (${count})${locked ? " — LOCKED" : ""}`)
-    .setDescription(
-      (locked ? "_Locked — not accepting new joins right now._\n\n" : "") + testersBlock + queueText
+
+  const testerValue = testerIds.length > 0
+    ? testerIds.map((id, i) => `\`${i + 1}.\` <@${id}>`).join("\n")
+    : "_None online_";
+
+  if (active?.testeeId) {
+    embed.addFields(
+      { name: "🎯  Currently Testing", value: `<@${active.testeeId}>`, inline: true },
+      { name: "👥  Active Testers", value: testerValue, inline: true }
     );
+  } else {
+    embed.addFields({ name: "👥  Active Testers", value: testerValue });
+  }
+
+  const queueValue = queueText.replace(/^\*\*Queue\*\*\n/, "");
+  embed.addFields(
+    { name: "​", value: "​" },
+    { name: `📋  Queue — ${count} player${count !== 1 ? "s" : ""} waiting`, value: queueValue || "_Queue is empty_" }
+  );
+
+  if (locked) embed.setFooter({ text: "🔒  Locked — not accepting new joins right now" });
+
+  return embed;
 }
 
 async function buildHighQueueEmbed(highKey, gamemode) {
   const region = regionFromQueueKey(highKey);
-  const [closed, locked, count, testersBlock, queueText] = await Promise.all([
+  const [closed, locked, count, testerIds, queueText] = await Promise.all([
     isQueueClosed(highKey),
     getQueueLocked(highKey),
     getQueueCount(highKey),
-    activeTestersBlock(highKey),
+    getQueueTesterIds(highKey),
     formatQueue(highKey),
   ]);
+
+  const display = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode.toUpperCase();
+  const gmEmoji = GAMEMODE_EMOJIS[gamemode] || "🎮";
+
   const embed = new EmbedBuilder()
-    .setAuthor(queueAuthor(gamemode, region))
-    .setColor(closed ? 0x555555 : locked ? 0xff8a3d : 0xff8a3d);
+    .setAuthor({ name: "RyftTiers", iconURL: client.user?.displayAvatarURL() })
+    .setTitle(`${gmEmoji}  ${display} — ${region}  ⭐ High Queue`)
+    .setColor(closed ? 0x2b2d31 : locked ? 0xe67e22 : 0xf1c40f);
+
   if (closed) {
-    return embed.setDescription(await closedCardDescription(highKey));
+    const lastOpenedAt = await getQueueLastOpenedAt(highKey);
+    const ts = lastOpenedAt
+      ? `<t:${Math.floor(new Date(lastOpenedAt).getTime() / 1000)}:F>`
+      : "Hasn't been opened yet";
+    return embed.setDescription(
+      `## ⛔  No Testers Online\nNo testers are available right now. You'll be pinged here the moment a tester opens the high queue.\n\n**Last session:** ${ts}`
+    );
   }
+
   const active = getActiveTesting(highKey);
   if (active?.testeeId) {
     const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
     if (ign) embed.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/128`);
   }
-  return embed
-    .setTitle(`${gamemode.toUpperCase()} ${region} HIGH Queue (${count})${locked ? " — LOCKED" : ""}`)
-    .setDescription(
-      (locked ? "_Locked — not accepting new joins right now._\n\n" : "") +
-        testersBlock +
-        `Only players already tiered **LT3 or better** in ${gamemode.toUpperCase()} can join.\n\n${queueText}`
+
+  const testerValue = testerIds.length > 0
+    ? testerIds.map((id, i) => `\`${i + 1}.\` <@${id}>`).join("\n")
+    : "_None online_";
+
+  if (active?.testeeId) {
+    embed.addFields(
+      { name: "🎯  Currently Testing", value: `<@${active.testeeId}>`, inline: true },
+      { name: "👥  Active Testers", value: testerValue, inline: true }
     );
+  } else {
+    embed.addFields({ name: "👥  Active Testers", value: testerValue });
+  }
+
+  const queueValue = queueText.replace(/^\*\*Queue\*\*\n/, "");
+  embed.addFields(
+    { name: "​", value: "​" },
+    { name: `📋  Queue — ${count} player${count !== 1 ? "s" : ""} waiting`, value: queueValue || "_Queue is empty_" }
+  );
+
+  const footerParts = ["⭐ LT3+ players only"];
+  if (locked) footerParts.push("🔒 Locked — not accepting new joins");
+  embed.setFooter({ text: footerParts.join("  •  ") });
+
+  return embed;
 }
 
 // Main queue message. Closed: a single "Open Queue" button (testers only).
