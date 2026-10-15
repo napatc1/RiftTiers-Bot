@@ -712,7 +712,6 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
   ]);
 
   const rawName = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
-  const titleText = rawName.toUpperCase() + "  —  " + region + (isHigh ? "  ★ HIGH" : "");
 
   async function resolveName(id) {
     try { return (await guild.members.fetch(id)).displayName; } catch { return "..."; }
@@ -723,13 +722,22 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
     Promise.all(queuePlayerIds.map(resolveName)),
   ]);
 
+  // Load MC head images for queue players (best-effort)
+  const queueHeads = await Promise.all(
+    queuePlayerIds.map(async (id) => {
+      const ign = await getVerifiedUsername(id).catch(() => null);
+      if (!ign) return null;
+      return loadImage(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/32`).catch(() => null);
+    })
+  );
+
   const active = getActiveTesting(queueKey);
   let activeTesteeName = null;
-  let headImg = null;
+  let activeHead = null;
   if (!closed && active?.testeeId) {
     activeTesteeName = await resolveName(active.testeeId);
     const ign = await getVerifiedUsername(active.testeeId).catch(() => null);
-    if (ign) headImg = await loadImage(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/64`).catch(() => null);
+    if (ign) activeHead = await loadImage(`https://mc-heads.net/avatar/${encodeURIComponent(ign)}/32`).catch(() => null);
   }
 
   let lastSessionText = null;
@@ -744,177 +752,260 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
     }
   }
 
-  // Colors
-  const accentColor = closed ? "#4f545c" : isHigh ? "#f0b429" : locked ? "#e8843a" : "#3ba55d";
-  const statusLabel = closed ? "OFFLINE" : locked ? "LOCKED" : "OPEN";
-  const statusBg    = closed ? "#4f545c" : locked ? "#e8843a" : "#3ba55d";
+  // ── Website design tokens ─────────────────────────────────────────────────
+  const BG        = "#060810";
+  const PANEL     = "#0f1318";
+  const LINE      = "rgba(255,255,255,0.08)";
+  const TEXT      = "#e9eaec";
+  const TEXT_DIM  = "#838a94";
+  const ACCENT    = "#3fa0f5";
+  const ACCENT_DIM = "rgba(63,160,245,0.15)";
+  const ACCENT_BORDER = "rgba(63,160,245,0.3)";
+  const EMBER     = "#ff7a45";
+  const EMBER_DIM = "rgba(255,122,69,0.12)";
+  const EMBER_BDR = "rgba(255,122,69,0.3)";
+  const ROW_LINE  = "rgba(255,255,255,0.07)";
 
-  // Layout
-  const W    = 500;
+  const statusLabel = closed ? "OFFLINE" : locked ? "LOCKED" : isHigh ? "HIGH · OPEN" : "OPEN";
+  const statusAccent = closed ? "rgba(131,138,148,0.5)" : locked ? EMBER : ACCENT;
+  const statusBg     = closed ? "rgba(131,138,148,0.12)" : locked ? EMBER_DIM : ACCENT_DIM;
+  const statusBdr    = closed ? "rgba(131,138,148,0.25)" : locked ? EMBER_BDR : ACCENT_BORDER;
+
+  // ── Layout ────────────────────────────────────────────────────────────────
+  const W    = 560;
   const PAD  = 22;
-  const AW   = 4;    // accent bar width
-  const X    = AW + PAD;
-  const HH   = 76;   // header height
-  const SH   = 26;   // section label row
-  const RH   = 32;   // per-player row
-  const HS   = 44;   // head size
-  const GAP  = 14;   // gap between sections
+  const CR   = 14;
+  const COL  = PAD + 300 + 16;  // x-start of right column (testers)
+  const ROW_H = 36;
+  const CHIP_H = 22;
 
-  let bodyH = GAP;
+  // Height calculation
+  const HEADER_H = 68;
+
+  let bodyH = PAD;
   if (closed) {
-    bodyH += 38 + 20 + (lastSessionText ? 20 : 0) + GAP;
+    bodyH += 36 + 12 + 16 + (lastSessionText ? 16 : 0) + PAD;
   } else {
-    bodyH += SH + Math.max(testerIds.length, 1) * RH + GAP;
-    if (activeTesteeName) bodyH += SH + HS + 8 + GAP;
-    bodyH += SH + Math.max(count, 1) * RH + GAP;
+    const COL_HEAD = 24;
+    const qRows = Math.max(count, 1) * ROW_H;
+    const tChipRows = Math.ceil(Math.max(testerIds.length, 1) / 4) * (CHIP_H + 6);
+    bodyH += COL_HEAD + Math.max(qRows, tChipRows);
+    if (activeTesteeName) bodyH += ROW_H + 12;
     if (isHigh || locked) bodyH += 20;
+    bodyH += PAD;
   }
-  const H = HH + bodyH + 14;
+
+  const H = HEADER_H + 1 + bodyH;
 
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  // Background
-  ctx.fillStyle = "#1e1f22";
+  // ── Background: dark navy with gradient glow blobs ────────────────────────
+  ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
 
-  // Accent bar
-  ctx.fillStyle = accentColor;
-  ctx.fillRect(0, 0, AW, H);
+  // Blue glow blob (top-right)
+  const g1 = ctx.createRadialGradient(W * 0.85, H * 0.1, 0, W * 0.85, H * 0.1, W * 0.6);
+  g1.addColorStop(0, "rgba(56,120,240,0.28)");
+  g1.addColorStop(1, "rgba(56,120,240,0)");
+  ctx.fillStyle = g1;
+  ctx.fillRect(0, 0, W, H);
 
-  // Header background
-  ctx.fillStyle = "#232428";
-  ctx.fillRect(AW, 0, W - AW, HH);
-  // Header bottom divider
-  ctx.fillStyle = "#2d2f34";
-  ctx.fillRect(AW, HH - 1, W - AW, 1);
+  // Purple glow blob (bottom-left)
+  const g2 = ctx.createRadialGradient(W * 0.05, H * 0.9, 0, W * 0.05, H * 0.9, W * 0.5);
+  g2.addColorStop(0, "rgba(120,60,220,0.18)");
+  g2.addColorStop(1, "rgba(120,60,220,0)");
+  ctx.fillStyle = g2;
+  ctx.fillRect(0, 0, W, H);
 
-  // Title
-  ctx.fillStyle = "#f2f3f5";
-  ctx.font = "700 20px Inter";
-  ctx.fillText(titleText, X, 34);
-
-  // Subtitle
-  ctx.fillStyle = "#6d717a";
-  ctx.font = "400 13px Inter";
-  ctx.fillText("RyftTiers Tier Testing", X, 56);
-
-  // Status badge
-  ctx.font = "700 11px Inter";
-  const bw = ctx.measureText(statusLabel).width + 22;
-  const bx = W - PAD - bw;
-  const by = 22;
-  const bh = 24;
-  ctx.fillStyle = statusBg;
-  roundRect(ctx, bx, by, bw, bh, 5);
+  // ── Card panel ────────────────────────────────────────────────────────────
+  ctx.fillStyle = PANEL;
+  roundRect(ctx, 0, 0, W, H, CR);
   ctx.fill();
-  ctx.fillStyle = "#ffffff";
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1;
+  roundRect(ctx, 0.5, 0.5, W - 1, H - 1, CR);
+  ctx.stroke();
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  // "Ryft" white + "Tiers" blue wordmark
+  ctx.font = "700 11px Inter";
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  ctx.fillText("Ryft", PAD, PAD + 13);
+  const ryftW = ctx.measureText("Ryft").width;
+  ctx.fillStyle = ACCENT;
+  ctx.fillText("Tiers", PAD + ryftW, PAD + 13);
+
+  // Gamemode title
+  const gmLabel = rawName.toUpperCase();
+  ctx.font = "700 19px Inter";
+  ctx.fillStyle = TEXT;
+  ctx.fillText(gmLabel, PAD, PAD + 13 + 6 + 19);
+
+  // Region tag after title
+  const gmW = ctx.measureText(gmLabel).width;
+  ctx.font = "600 13px Inter";
+  ctx.fillStyle = TEXT_DIM;
+  ctx.fillText("· " + region + (isHigh ? " · HIGH" : ""), PAD + gmW + 10, PAD + 13 + 6 + 19);
+
+  // Status chip (top-right)
+  ctx.font = "700 10px Inter";
+  const chipW = ctx.measureText(statusLabel).width + 20;
+  const chipH2 = 22;
+  const chipX = W - PAD - chipW;
+  const chipY = PAD + 2;
+  ctx.fillStyle = statusBg;
+  roundRect(ctx, chipX, chipY, chipW, chipH2, 11);
+  ctx.fill();
+  ctx.strokeStyle = statusBdr;
+  ctx.lineWidth = 1;
+  roundRect(ctx, chipX + 0.5, chipY + 0.5, chipW - 1, chipH2 - 1, 11);
+  ctx.stroke();
+  ctx.fillStyle = statusAccent;
   ctx.textAlign = "center";
-  ctx.fillText(statusLabel, bx + bw / 2, by + 16);
+  ctx.fillText(statusLabel, chipX + chipW / 2, chipY + 15);
   ctx.textAlign = "left";
 
-  // Body
-  let y = HH + GAP;
+  // Header divider
+  ctx.fillStyle = LINE;
+  ctx.fillRect(PAD, HEADER_H, W - PAD * 2, 1);
 
-  function secLabel(label) {
-    ctx.fillStyle = "#6d717a";
-    ctx.font = "700 10px Inter";
-    ctx.fillText(label, X, y + 12);
-    const lw = ctx.measureText(label).width;
-    ctx.strokeStyle = "#2d2f34";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(X + lw + 10, y + 8);
-    ctx.lineTo(W - PAD, y + 8);
-    ctx.stroke();
-    y += SH;
-  }
+  // ── Body ──────────────────────────────────────────────────────────────────
+  let y = HEADER_H + 1 + PAD;
 
   if (closed) {
-    ctx.fillStyle = "#6d717a";
-    ctx.font = "700 17px Inter";
-    ctx.fillText("Queue Offline", X, y + 22);
-    y += 38;
-    ctx.fillStyle = "#4a4d55";
-    ctx.font = "400 13px Inter";
-    ctx.fillText("Testers will ping here when the queue opens.", X, y);
-    y += 20;
+    // Ember closed banner
+    ctx.fillStyle = EMBER_DIM;
+    roundRect(ctx, PAD, y, W - PAD * 2, 36, 8);
+    ctx.fill();
+    ctx.strokeStyle = EMBER_BDR;
+    ctx.lineWidth = 1;
+    roundRect(ctx, PAD + 0.5, y + 0.5, W - PAD * 2 - 1, 35, 8);
+    ctx.stroke();
+    ctx.fillStyle = EMBER;
+    ctx.font = "600 13px Inter";
+    ctx.fillText("Queue is closed", PAD + 14, y + 23);
+    y += 36 + 12;
+
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = "400 12px Inter";
+    ctx.fillText("Testers will ping here when the queue opens.", PAD, y);
+    y += 16;
+
     if (lastSessionText) {
-      ctx.fillStyle = "#3c3f47";
-      ctx.font = "400 12px Inter";
-      ctx.fillText("Last session:  " + lastSessionText, X, y);
+      ctx.fillStyle = "rgba(131,138,148,0.45)";
+      ctx.font = "400 11px Inter";
+      ctx.fillText("Last session: " + lastSessionText, PAD, y);
     }
   } else {
-    // Active testers
-    secLabel("ACTIVE TESTERS");
-    if (testerIds.length > 0) {
-      for (let i = 0; i < testerIds.length; i++) {
-        ctx.fillStyle = "#5d6068";
-        ctx.font = "700 12px Inter";
-        ctx.fillText(String(i + 1) + ".", X, y + 20);
-        ctx.fillStyle = "#dcddde";
-        ctx.font = "400 14px Inter";
-        ctx.fillText(testerNames[i], X + 22, y + 20);
-        y += RH;
-      }
+    // ── Column headers ────────────────────────────────────────────────────
+    const qLabel = count > 0 ? `QUEUE — ${count} WAITING` : "QUEUE";
+    ctx.fillStyle = TEXT_DIM;
+    ctx.font = "600 10px Inter";
+    ctx.fillText(qLabel, PAD, y + 13);
+    ctx.fillText("TESTERS ONLINE", COL, y + 13);
+    y += 24;
+
+    const colStartY = y;
+
+    // ── Queue rows ────────────────────────────────────────────────────────
+    if (count === 0) {
+      ctx.fillStyle = TEXT_DIM;
+      ctx.font = "400 12px Inter";
+      ctx.fillText("No one in queue", PAD, y + 22);
     } else {
-      ctx.fillStyle = "#4a4d55";
-      ctx.font = "400 13px Inter";
-      ctx.fillText("No testers online", X, y + 20);
-      y += RH;
-    }
-    y += GAP;
-
-    // Currently testing
-    if (activeTesteeName) {
-      secLabel("CURRENTLY TESTING");
-      if (headImg) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(X + HS / 2, y + HS / 2, HS / 2, 0, Math.PI * 2);
-        ctx.clip();
-        ctx.drawImage(headImg, X, y, HS, HS);
-        ctx.restore();
-        ctx.fillStyle = "#f2f3f5";
-        ctx.font = "600 16px Inter";
-        ctx.fillText(activeTesteeName, X + HS + 12, y + HS / 2 + 6);
-      } else {
-        ctx.fillStyle = "#f2f3f5";
-        ctx.font = "600 16px Inter";
-        ctx.fillText(activeTesteeName, X, y + HS / 2 + 4);
-      }
-      y += HS + 8 + GAP;
-    }
-
-    // Queue
-    const qLabel = count > 0 ? "QUEUE  —  " + count + " WAITING" : "QUEUE";
-    secLabel(qLabel);
-    if (count > 0) {
       for (let i = 0; i < queuePlayerIds.length; i++) {
-        ctx.fillStyle = "#5d6068";
-        ctx.font = "700 12px Inter";
-        ctx.fillText(String(i + 1) + ".", X, y + 20);
-        ctx.fillStyle = "#dcddde";
-        ctx.font = "400 14px Inter";
-        ctx.fillText(queueNames[i], X + 22, y + 20);
-        y += RH;
+        const ry = y + i * ROW_H;
+        if (i > 0) {
+          ctx.fillStyle = ROW_LINE;
+          ctx.fillRect(PAD, ry, COL - PAD - 16, 1);
+        }
+        // rank
+        ctx.fillStyle = TEXT_DIM;
+        ctx.font = "600 11px Inter";
+        ctx.fillText(String(i + 1), PAD, ry + 23);
+        // head
+        const hx = PAD + 18, hy = ry + 7, hs = 22;
+        if (queueHeads[i]) {
+          ctx.save();
+          roundRect(ctx, hx, hy, hs, hs, 4);
+          ctx.clip();
+          ctx.drawImage(queueHeads[i], hx, hy, hs, hs);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "rgba(255,255,255,0.07)";
+          roundRect(ctx, hx, hy, hs, hs, 4);
+          ctx.fill();
+        }
+        // name
+        ctx.fillStyle = TEXT;
+        ctx.font = "500 13px Inter";
+        ctx.fillText(queueNames[i], hx + hs + 8, ry + 23);
       }
-    } else {
-      ctx.fillStyle = "#4a4d55";
-      ctx.font = "400 13px Inter";
-      ctx.fillText("Empty — use the button below to join", X, y + 20);
-      y += RH;
     }
 
-    // Footer note
+    // ── Tester chips ──────────────────────────────────────────────────────
+    let cx = COL, cy = colStartY;
+    const rightEdge = W - PAD;
+    if (testerIds.length === 0) {
+      ctx.fillStyle = TEXT_DIM;
+      ctx.font = "400 12px Inter";
+      ctx.fillText("None online", COL, colStartY + 22);
+    } else {
+      for (let i = 0; i < testerIds.length; i++) {
+        ctx.font = "600 10px Inter";
+        const tw = ctx.measureText(testerNames[i]).width;
+        const cw = tw + 16;
+        if (cx + cw > rightEdge) { cx = COL; cy += CHIP_H + 6; }
+        ctx.fillStyle = ACCENT_DIM;
+        roundRect(ctx, cx, cy, cw, CHIP_H, 11);
+        ctx.fill();
+        ctx.fillStyle = ACCENT;
+        ctx.fillText(testerNames[i], cx + 8, cy + 15);
+        cx += cw + 6;
+      }
+    }
+
+    const bodyRowsH = Math.max(
+      count > 0 ? count * ROW_H : ROW_H,
+      testerIds.length === 0 ? ROW_H : Math.ceil(testerIds.length / 4) * (CHIP_H + 6)
+    );
+    y = colStartY + bodyRowsH;
+
+    // ── Currently testing row ─────────────────────────────────────────────
+    if (activeTesteeName) {
+      y += 8;
+      ctx.fillStyle = ROW_LINE;
+      ctx.fillRect(PAD, y, W - PAD * 2, 1);
+      y += 10;
+      ctx.fillStyle = TEXT_DIM;
+      ctx.font = "600 10px Inter";
+      ctx.fillText("CURRENTLY TESTING", PAD, y + 13);
+      y += 20;
+      if (activeHead) {
+        ctx.save();
+        roundRect(ctx, PAD, y, 22, 22, 4);
+        ctx.clip();
+        ctx.drawImage(activeHead, PAD, y, 22, 22);
+        ctx.restore();
+        ctx.fillStyle = TEXT;
+        ctx.font = "600 13px Inter";
+        ctx.fillText(activeTesteeName, PAD + 30, y + 16);
+      } else {
+        ctx.fillStyle = TEXT;
+        ctx.font = "600 13px Inter";
+        ctx.fillText(activeTesteeName, PAD, y + 16);
+      }
+    }
+
+    // ── Footer note ───────────────────────────────────────────────────────
     if (isHigh || locked) {
-      y += 6;
-      ctx.fillStyle = isHigh ? "#f0b429" : "#e8843a";
-      ctx.font = "400 11px Inter";
+      ctx.fillStyle = isHigh ? "#f0b429" : EMBER;
+      ctx.font = "400 10px Inter";
       ctx.fillText(
         isHigh ? (locked ? "★ LT3+ only  ·  Locked" : "★ LT3+ players only")
                : "Locked — not accepting new joins",
-        X, y + 12
+        PAD, H - PAD + 4
       );
     }
   }
