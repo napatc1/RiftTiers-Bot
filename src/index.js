@@ -937,65 +937,36 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-// Main queue message. Closed: a single "Open Queue" button (testers only).
-// Open: Join/Leave on one row, Next/Lock/Close (testers only) on another.
-// Returns an array of action rows, ready to pass straight as `components`.
+// Queue card buttons — player-facing only (Join/Leave).
+// Tester actions (start, stop, pull, lock, leave) are now /tester subcommands.
 async function buildQueueButtons(queueKey) {
   const closed = await isQueueClosed(queueKey);
-  if (closed) {
-    return [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("queue_open").setLabel("Open Queue").setStyle(ButtonStyle.Success)
-      ),
-    ];
-  }
+  if (closed) return [];
   const locked = await getQueueLocked(queueKey);
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("queue_join")
         .setLabel("Join Queue")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Primary)
         .setDisabled(locked),
       new ButtonBuilder().setCustomId("queue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary)
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("queue_next").setLabel("Next/Pull (Tester Only)").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId("queue_toggle_lock")
-        .setLabel(locked ? "Unlock Queue" : "Lock Queue")
-        .setStyle(locked ? ButtonStyle.Success : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("queue_close").setLabel("Close Queue").setStyle(ButtonStyle.Danger)
     ),
   ];
 }
 
 async function buildHighQueueButtons(highKey) {
   const closed = await isQueueClosed(highKey);
-  if (closed) {
-    return [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("highqueue_open").setLabel("Open Queue").setStyle(ButtonStyle.Success)
-      ),
-    ];
-  }
+  if (closed) return [];
   const locked = await getQueueLocked(highKey);
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("highqueue_join")
         .setLabel("Join High Queue")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Primary)
         .setDisabled(locked),
       new ButtonBuilder().setCustomId("highqueue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary)
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("highqueue_next").setLabel("Next/Pull (Tester Only)").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId("highqueue_toggle_lock")
-        .setLabel(locked ? "Unlock Queue" : "Lock Queue")
-        .setStyle(locked ? ButtonStyle.Success : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("highqueue_close").setLabel("Close Queue").setStyle(ButtonStyle.Danger)
     ),
   ];
 }
@@ -1740,132 +1711,177 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // /jointesting
-  if (interaction.isChatInputCommand() && interaction.commandName === "jointesting") {
+  // /tester — tester queue management (start, stop, pull, lock, leave)
+  if (interaction.isChatInputCommand() && interaction.commandName === "tester") {
     if (!isTester(interaction.member)) {
-      return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
+      return interaction.reply({ content: "Only testers can use this command.", ephemeral: true });
     }
     const parsed = parseChannelName(interaction.channel.name);
     if (!parsed) {
-      return interaction.reply({
-        content: "Run this in a tiertest queue channel, not here.",
-        ephemeral: true,
-      });
+      return interaction.reply({ content: "Run this inside a tier-test queue channel.", ephemeral: true });
     }
     const { gamemode, region } = parsed;
     const queueKey = `${gamemode}:${region}`;
-    const tester = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
-    const { isManager, isOwner } = computeRoleFlags(interaction.member);
-    if (!isManager && !isOwner && tester?.region !== region) {
-      return interaction.reply({
-        content: tester?.region
-          ? `This is the **${region}** queue — you're set to **${tester.region}**. Run this in your own region's channel instead.`
-          : "You don't have a region set yet — set your region at https://ryfttiers.pages.dev/Verify, then try again.",
-        ephemeral: true,
-      });
-    }
+    const action = interaction.options.getString("action");
 
-    const added = await addQueueTester(queueKey, interaction.user.id);
-    if (!added) {
-      return interaction.reply({
-        content: `You're already testing **${gamemode}** (${region}).`,
-        ephemeral: true,
-      });
-    }
-
-    // If a test is already in progress, add this tester to that ticket too
-    // so they don't have to wait for the next pull.
-    const active = getActiveTesting(queueKey);
-    if (active && !active.testerIds.includes(interaction.user.id)) {
-      try {
-        const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
-        await ticketChannel.permissionOverwrites.edit(interaction.user.id, {
-          ViewChannel: true,
-          SendMessages: true,
-          ReadMessageHistory: true,
+    // --- /tester start ---
+    if (action === "start") {
+      await interaction.deferReply({ ephemeral: true });
+      const { isManager, isOwner } = computeRoleFlags(interaction.member);
+      const testerRecord = await ensurePlayerForDiscordUser(interaction.user.id, interaction.member.displayName);
+      if (!isManager && !isOwner && testerRecord?.region !== region) {
+        return interaction.editReply({
+          content: testerRecord?.region
+            ? `This is the **${region}** queue — you're set to **${testerRecord.region}**. Run this in your own region's channel instead.`
+            : "You don't have a region set yet — set your region at https://ryfttiers.pages.dev/Verify, then try again.",
         });
-        active.testerIds.push(interaction.user.id);
-        await ticketChannel.send({
-          content: `<@${interaction.user.id}> joined this test as a second tester.`,
-        });
-      } catch (err) {
-        console.error("Couldn't add jointesting tester to active ticket:", err.message);
       }
-    }
 
-    // Refresh the queue message so the Active Testers list shows the new tester.
-    try {
-      const stored = getQueueMessage(queueKey);
-      if (stored) {
-        const queueCh = await interaction.guild.channels.fetch(stored.channelId);
+      const queueWasClosed = await isQueueClosed(queueKey);
+
+      if (queueWasClosed) {
+        // Opening a closed queue: set open, add as tester, ping.
+        await setQueueClosed(queueKey, false);
+        await addQueueTester(queueKey, interaction.user.id);
         suppressRealtimeFor(queueKey);
-        await postFreshQueueMessage(queueCh, queueKey, gamemode);
+        const pingContent = `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`;
+        await postFreshQueueMessage(interaction.channel, queueKey, gamemode, { content: pingContent });
+        return interaction.editReply({ content: `Queue opened for **${gamemode}** (${region}). You've been added as a tester.` });
+      } else {
+        // Queue already open — join as an additional tester.
+        const added = await addQueueTester(queueKey, interaction.user.id);
+        if (!added) {
+          return interaction.editReply({ content: `You're already listed as a tester for **${gamemode}** (${region}).` });
+        }
+
+        // If a test is in progress, grant access to that ticket immediately.
+        const active = getActiveTesting(queueKey);
+        if (active && !active.testerIds.includes(interaction.user.id)) {
+          try {
+            const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
+            await ticketChannel.permissionOverwrites.edit(interaction.user.id, {
+              ViewChannel: true,
+              SendMessages: true,
+              ReadMessageHistory: true,
+            });
+            active.testerIds.push(interaction.user.id);
+            await ticketChannel.send({ content: `<@${interaction.user.id}> joined as a second tester.` });
+          } catch (err) {
+            console.error("[tester start] Couldn't add to active ticket:", err.message);
+          }
+        }
+
+        suppressRealtimeFor(queueKey);
+        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        return interaction.editReply({ content: `You're now testing **${gamemode}** (${region}) alongside the other tester(s).` });
       }
-    } catch (err) {
-      console.error("Couldn't refresh queue message after jointesting:", err.message);
     }
 
-    return interaction.reply({
-      content: `You're now testing **${gamemode}** (${region}) alongside the other tester(s).`,
-      ephemeral: true,
-    });
-  }
-
-  // /leavetesting
-  if (interaction.isChatInputCommand() && interaction.commandName === "leavetesting") {
-    const parsed = parseChannelName(interaction.channel.name);
-    if (!parsed) {
-      return interaction.reply({
-        content: "Run this in a tiertest queue channel, not here.",
-        ephemeral: true,
-      });
-    }
-    const { gamemode, region } = parsed;
-    const queueKey = `${gamemode}:${region}`;
-
-    const removed = await removeQueueTester(queueKey, interaction.user.id);
-    if (!removed) {
-      return interaction.reply({
-        content: `You're not currently testing **${gamemode}** (${region}).`,
-        ephemeral: true,
-      });
+    // --- /tester stop ---
+    if (action === "stop") {
+      await interaction.deferReply({ ephemeral: true });
+      await clearQueueEntries(queueKey);
+      await clearQueueTesters(queueKey);
+      await setQueueClosed(queueKey, true);
+      suppressRealtimeFor(queueKey);
+      await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      return interaction.editReply({ content: `Queue closed for **${gamemode}** (${region}). All testers and queue entries cleared.` });
     }
 
-    // If a test is in progress and this tester was part of it, drop them
-    // from that ticket's tester list and revoke their personal access.
-    const active = getActiveTesting(queueKey);
-    if (active) {
-      const idx = active.testerIds.indexOf(interaction.user.id);
-      if (idx !== -1) {
-        active.testerIds.splice(idx, 1);
-        try {
-          const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
-          await ticketChannel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
-          await ticketChannel.send({
-            content: `<@${interaction.user.id}> stopped testing this one.`,
-          });
-        } catch (err) {
-          console.error("Couldn't remove leavetesting tester from active ticket:", err.message);
+    // --- /tester pull ---
+    if (action === "pull") {
+      await interaction.deferReply({ ephemeral: true });
+
+      const testeeId = await popNext(queueKey);
+      if (!testeeId) {
+        return interaction.editReply({ content: "The queue is empty — nobody to pull." });
+      }
+
+      const testerMember = interaction.member;
+      let ticketChannel;
+      try {
+        ticketChannel = await createTicketChannel(interaction.guild, interaction.channel, gamemode, testerMember, testeeId);
+      } catch (err) {
+        console.error("[tester pull] createTicketChannel failed:", err.message);
+        return interaction.editReply({ content: `Failed to create ticket channel: ${err.message}` });
+      }
+
+      const testeeName = (await getVerifiedUsername(testeeId)) || `<@${testeeId}>`;
+      const info = {
+        ticketChannelId: ticketChannel.id,
+        testerIds: [interaction.user.id],
+        testerNames: [interaction.member.displayName],
+        gamemode,
+        region,
+        testeeName,
+        isHigh: false,
+      };
+      setActiveTesting(queueKey, info);
+
+      try {
+        await setLiveTest(ticketChannel.id, info);
+      } catch (err) {
+        console.error("[tester pull] setLiveTest failed:", err.message);
+      }
+
+      dmUser(testeeId, `You've been pulled from the **${gamemode}** queue (${region}) — check ${ticketChannel} for your test ticket!`);
+
+      suppressRealtimeFor(queueKey);
+      await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      return interaction.editReply({ content: `Pulled <@${testeeId}> — ticket: ${ticketChannel}.` });
+    }
+
+    // --- /tester lock ---
+    if (action === "lock") {
+      await interaction.deferReply({ ephemeral: true });
+      const locked = await getQueueLocked(queueKey);
+      await setQueueLocked(queueKey, !locked);
+      suppressRealtimeFor(queueKey);
+      await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      return interaction.editReply({ content: locked ? `Queue unlocked for **${gamemode}** (${region}).` : `Queue locked for **${gamemode}** (${region}) — nobody new can join.` });
+    }
+
+    // --- /tester leave ---
+    if (action === "leave") {
+      await interaction.deferReply({ ephemeral: true });
+
+      const removed = await removeQueueTester(queueKey, interaction.user.id);
+      if (!removed) {
+        return interaction.editReply({ content: `You're not currently listed as a tester for **${gamemode}** (${region}).` });
+      }
+
+      // If a test is in progress, revoke this tester's access to that ticket.
+      const active = getActiveTesting(queueKey);
+      if (active) {
+        const idx = active.testerIds.indexOf(interaction.user.id);
+        if (idx !== -1) {
+          active.testerIds.splice(idx, 1);
+          try {
+            const ticketChannel = await interaction.guild.channels.fetch(active.ticketChannelId);
+            await ticketChannel.permissionOverwrites.delete(interaction.user.id).catch(() => {});
+            await ticketChannel.send({ content: `<@${interaction.user.id}> stopped testing this one.` });
+          } catch (err) {
+            console.error("[tester leave] Couldn't remove from active ticket:", err.message);
+          }
         }
       }
-    }
 
-    // Refresh the queue message so the Active Testers list drops this tester.
-    try {
-      const stored = getQueueMessage(queueKey);
-      if (stored) {
-        const queueCh = await interaction.guild.channels.fetch(stored.channelId);
+      const remainingTesters = await getQueueTesterIds(queueKey);
+      if (remainingTesters.length === 0) {
+        // Last tester left — close the queue.
+        await clearQueueEntries(queueKey);
+        await setQueueClosed(queueKey, true);
         suppressRealtimeFor(queueKey);
-        await postFreshQueueMessage(queueCh, queueKey, gamemode);
+        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+        return interaction.editReply({ content: `You left. No testers remaining — **${gamemode}** (${region}) queue has been closed.` });
       }
-    } catch (err) {
-      console.error("Couldn't refresh queue message after leavetesting:", err.message);
+
+      suppressRealtimeFor(queueKey);
+      await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
+      return interaction.editReply({ content: `You've left the active testers for **${gamemode}** (${region}).` });
     }
 
-    return interaction.reply({
-      content: `You've stopped testing **${gamemode}** (${region}).`,
-      ephemeral: true,
-    });
+    return interaction.reply({ content: "Unknown action.", ephemeral: true });
   }
 
   // /util removetester — managers/owners can kick any tester off the active list
@@ -3083,29 +3099,6 @@ client.on("interactionCreate", async (interaction) => {
     const queueKey = `${gamemode}:${region}`;
     const highKey = `${queueKey}:high`;
 
-    // A tester may only manage (open/close/lock/claim) the queue matching
-    // their own verified region — an EU tester can't run the NA queue, etc.
-    // Returns the tester's own region string on success, or replies with an
-    // error and returns null.
-    async function requireOwnRegion(member, userId) {
-      const { isManager, isOwner } = computeRoleFlags(member);
-      if (isManager || isOwner) return { ok: true };
-      const tester = await ensurePlayerForDiscordUser(userId, member.displayName);
-      if (!tester?.region) {
-        return {
-          ok: false,
-          message: "You don't have a region set yet — set your region on the website: <https://ryfttiers.pages.dev/Verify> — then try again.",
-        };
-      }
-      if (tester.region !== region) {
-        return {
-          ok: false,
-          message: `This is the **${region}** queue — you're set to **${tester.region}**. Head to your own region's channel instead.`,
-        };
-      }
-      return { ok: true };
-    }
-
     if (interaction.customId === "queue_join") {
       await interaction.deferReply({ ephemeral: true });
       if (isRestricted(interaction.member)) {
@@ -3167,159 +3160,6 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({
         content: left ? "You left the queue." : "You weren't in the queue.",
       });
-    }
-
-    // Closed -> open. The region is fixed by the channel itself — just
-    // confirms the tester is actually from that region.
-    if (interaction.customId === "queue_open") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      try {
-        const check = await requireOwnRegion(interaction.member, interaction.user.id);
-        if (!check.ok) return interaction.editReply({ content: check.message });
-        suppressRealtimeFor(queueKey);
-        await setQueueClosed(queueKey, false);
-        await setQueueLocked(queueKey, false);
-        await addQueueTester(queueKey, interaction.user.id);
-        await postFreshQueueMessage(interaction.channel, queueKey, gamemode, {
-          content: `${getRolePing(interaction.guild, gamemode)}Queue is open! (${region})`,
-        });
-        return interaction.editReply({ content: `Queue opened on **${region}** servers.` });
-      } catch (err) {
-        console.error("[queue_open] failed:", err.message);
-        return interaction.editReply({ content: "Something went wrong opening the queue. Check bot logs." });
-      }
-    }
-
-    // Open queue, stays open/visible, just stops new joins — distinct from
-    // fully closing it.
-    if (interaction.customId === "queue_toggle_lock") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-      const nowLocked = !(await getQueueLocked(queueKey));
-      await setQueueLocked(queueKey, nowLocked);
-      await refreshQueueMessage(interaction, queueKey, gamemode);
-      return interaction.editReply({
-        content: nowLocked ? "Queue locked to new joins." : "Queue unlocked.",
-      });
-    }
-
-    // Open -> closed. Deletes the open card and posts a fresh closed
-    // "No Testers Online" one in its place.
-    if (interaction.customId === "queue_close") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-      // Remove this tester from the active list first.
-      await removeQueueTester(queueKey, interaction.user.id);
-      const remaining = await getQueueTesterIds(queueKey);
-      if (remaining.length > 0) {
-        // Other testers still active — just refresh the card without closing.
-        suppressRealtimeFor(queueKey);
-        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
-        await interaction.editReply({ content: "You've stopped testing. The queue stays open for the other testers." });
-      } else {
-        // Last tester — fully close and wipe.
-        suppressRealtimeFor(queueKey);
-        await setQueueClosed(queueKey, true);
-        await setQueueLocked(queueKey, false);
-        await clearQueueEntries(queueKey);
-        await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
-        await interaction.editReply({ content: "Closing the queue." });
-      }
-      return;
-    }
-
-    if (interaction.customId === "queue_next") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      // Ack immediately — the Supabase/Discord lookups below can take
-      // longer than Discord's 3-second reply window.
-      await interaction.deferReply({ ephemeral: true });
-
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-
-      await addQueueTester(queueKey, interaction.member.id);
-      const nextUserId = await popNext(queueKey);
-
-      if (!nextUserId) {
-        await refreshQueueMessage(interaction, queueKey, gamemode);
-        return interaction.editReply({ content: "Queue is empty." });
-      }
-
-      try {
-        const ticketChannel = await createTicketChannel(
-          interaction.guild,
-          interaction.channel,
-          gamemode,
-          interaction.member,
-          nextUserId
-        );
-        const testerIds = await getQueueTesterIds(queueKey);
-        setActiveTesting(queueKey, {
-          ticketChannelId: ticketChannel.id,
-          testerIds,
-          testeeId: nextUserId,
-          queueChannelId: interaction.channelId,
-          queueMessageId: interaction.message.id,
-          gamemode,
-          region,
-          isHigh: false,
-        });
-
-        const testeeName = await resolveDisplayName(interaction.guild, nextUserId);
-        const testerNames = await Promise.all(
-          testerIds.map((id) => resolveDisplayName(interaction.guild, id))
-        );
-        await setLiveTest(ticketChannel.id, {
-          testeeName,
-          testerNames,
-          testerIds,
-          gamemode,
-          startedAt: Date.now(),
-        });
-
-        // DM the testee that their test is starting
-        dmUser(nextUserId, `🟢 **Your ${gamemode} test is starting!** Head to your test channel: https://discord.com/channels/${interaction.guild.id}/${ticketChannel.id}`);
-
-        // DM the new #1 in queue (if someone is now first after the pull)
-        const queueData = await supabase
-          .from("queue_entries")
-          .select("players!queue_entries_player_id_fkey(discord_id)")
-          .eq("gamemode", queueKey)
-          .order("joined_at", { ascending: true })
-          .limit(1)
-          .then(({ data }) => data);
-        if (queueData && queueData.length > 0) {
-          const newFirstId = queueData[0]?.players?.discord_id;
-          if (newFirstId) {
-            dmUser(newFirstId, `🟡 You're now **#1 in the ${gamemode} queue** — get ready! A tester will pull you shortly.`);
-          }
-        }
-
-        await refreshQueueMessage(interaction, queueKey, gamemode);
-        return interaction.editReply({
-          content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
-        });
-      } catch (err) {
-        console.error(err);
-        await refreshQueueMessage(interaction, queueKey, gamemode);
-        return interaction.editReply({
-          content:
-            "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
-        });
-      }
     }
 
     // ---------- high queue ----------
@@ -3391,150 +3231,6 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.editReply({
         content: left ? "You left the high queue." : "You weren't in the high queue.",
       });
-    }
-
-    if (interaction.customId === "highqueue_open") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      try {
-        const check = await requireOwnRegion(interaction.member, interaction.user.id);
-        if (!check.ok) return interaction.editReply({ content: check.message });
-        suppressRealtimeFor(highKey);
-        await setQueueClosed(highKey, false);
-        await setQueueLocked(highKey, false);
-        await addQueueTester(highKey, interaction.user.id);
-        await postFreshQueueMessage(interaction.channel, highKey, gamemode, {
-          isHigh: true,
-          content: `${getRolePing(interaction.guild, gamemode)}High queue is open! (${region})`,
-        });
-        return interaction.editReply({ content: `High queue opened on **${region}** servers.` });
-      } catch (err) {
-        console.error("[highqueue_open] failed:", err.message);
-        return interaction.editReply({ content: "Something went wrong opening the high queue. Check bot logs." });
-      }
-    }
-
-    if (interaction.customId === "highqueue_toggle_lock") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-      const nowLocked = !(await getQueueLocked(highKey));
-      await setQueueLocked(highKey, nowLocked);
-      await refreshHighQueueMessage(interaction, highKey, gamemode);
-      return interaction.editReply({
-        content: nowLocked ? "High queue locked to new joins." : "High queue unlocked.",
-      });
-    }
-
-    if (interaction.customId === "highqueue_close") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-      await removeQueueTester(highKey, interaction.user.id);
-      const remaining = await getQueueTesterIds(highKey);
-      if (remaining.length > 0) {
-        suppressRealtimeFor(highKey);
-        await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
-        await interaction.editReply({ content: "You've stopped testing. The high queue stays open for the other testers." });
-      } else {
-        suppressRealtimeFor(highKey);
-        await setQueueClosed(highKey, true);
-        await setQueueLocked(highKey, false);
-        await clearQueueEntries(highKey);
-        await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
-        await interaction.editReply({ content: "Closing this high queue." });
-      }
-      return;
-    }
-
-    if (interaction.customId === "highqueue_next") {
-      if (!isTester(interaction.member)) {
-        return interaction.reply({ content: "Only testers can do that.", ephemeral: true });
-      }
-      await interaction.deferReply({ ephemeral: true });
-
-      const check = await requireOwnRegion(interaction.member, interaction.user.id);
-      if (!check.ok) return interaction.editReply({ content: check.message });
-
-      await addQueueTester(highKey, interaction.member.id);
-      const nextUserId = await popNext(highKey);
-
-      if (!nextUserId) {
-        await refreshHighQueueMessage(interaction, highKey, gamemode);
-        return interaction.editReply({ content: "High queue is empty." });
-      }
-
-      try {
-        const ticketChannel = await createTicketChannel(
-          interaction.guild,
-          interaction.channel,
-          gamemode,
-          interaction.member,
-          nextUserId,
-          { isHigh: true }
-        );
-        const testerIds = await getQueueTesterIds(highKey);
-        setActiveTesting(highKey, {
-          ticketChannelId: ticketChannel.id,
-          testerIds,
-          testeeId: nextUserId,
-          queueChannelId: interaction.channelId,
-          queueMessageId: interaction.message.id,
-          gamemode,
-          region,
-          isHigh: true,
-        });
-
-        const highTesteeName = await resolveDisplayName(interaction.guild, nextUserId);
-        const highTesterNames = await Promise.all(
-          testerIds.map((id) => resolveDisplayName(interaction.guild, id))
-        );
-        await setLiveTest(ticketChannel.id, {
-          testeeName: highTesteeName,
-          testerNames: highTesterNames,
-          testerIds,
-          gamemode: `${gamemode} (high)`,
-          startedAt: Date.now(),
-        });
-
-        // DM the testee that their test is starting
-        dmUser(nextUserId, `🟢 **Your ${gamemode} high-tier test is starting!** Head to your test channel: https://discord.com/channels/${interaction.guild.id}/${ticketChannel.id}`);
-
-        // DM the new #1 in high queue after the pull
-        const highQueueData = await supabase
-          .from("queue_entries")
-          .select("players!queue_entries_player_id_fkey(discord_id)")
-          .eq("gamemode", highKey)
-          .order("joined_at", { ascending: true })
-          .limit(1)
-          .then(({ data }) => data);
-        if (highQueueData && highQueueData.length > 0) {
-          const newFirstId = highQueueData[0]?.players?.discord_id;
-          if (newFirstId) {
-            dmUser(newFirstId, `🟡 You're now **#1 in the ${gamemode} high queue** — get ready! A tester will pull you shortly.`);
-          }
-        }
-
-        await refreshHighQueueMessage(interaction, highKey, gamemode);
-        return interaction.editReply({
-          content: `Created a private ticket for <@${nextUserId}>: ${ticketChannel}`,
-        });
-      } catch (err) {
-        console.error(err);
-        await refreshHighQueueMessage(interaction, highKey, gamemode);
-        return interaction.editReply({
-          content:
-            "Couldn't create the ticket channel. Make sure the bot has the \"Manage Channels\" permission.",
-        });
-      }
     }
   }
 

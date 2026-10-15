@@ -41,15 +41,20 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
-    .setName("jointesting")
-    .setDescription(
-      "Join this queue as a tester alongside anyone already testing here. Run this in the queue channel."
-    ),
-
-  new SlashCommandBuilder()
-    .setName("leavetesting")
-    .setDescription(
-      "Stop testing this queue. Run this in the queue channel."
+    .setName("tester")
+    .setDescription("Tester queue management. Run inside a tier-test queue channel.")
+    .addStringOption((opt) =>
+      opt
+        .setName("action")
+        .setDescription("What to do")
+        .setRequired(true)
+        .addChoices(
+          { name: "start  — open queue / join as tester", value: "start" },
+          { name: "stop   — force-close the queue",       value: "stop"  },
+          { name: "pull   — pull the next player",        value: "pull"  },
+          { name: "lock   — toggle queue lock on/off",    value: "lock"  },
+          { name: "leave  — leave active testers (closes if last)", value: "leave" },
+        )
     ),
 
   new SlashCommandBuilder()
