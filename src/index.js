@@ -20,6 +20,11 @@ const {
   AttachmentBuilder,
 } = require("discord.js");
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
+// Register Inter font family (available on the server) for canvas rendering.
+GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Regular.otf", "Inter");
+GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Medium.otf", "Inter");
+GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", "Inter");
+GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Bold.otf", "Inter");
 const commands = require("./commands");
 const {
   GAMEMODE_CHANNELS,
@@ -706,10 +711,11 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
     getQueuePlayerIds(queueKey),
   ]);
 
-  const display = (GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode).toUpperCase();
+  const rawName = GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode;
+  const titleText = rawName.toUpperCase() + "  —  " + region + (isHigh ? "  ★ HIGH" : "");
 
   async function resolveName(id) {
-    try { return (await guild.members.fetch(id)).displayName; } catch { return `...`; }
+    try { return (await guild.members.fetch(id)).displayName; } catch { return "..."; }
   }
 
   const [testerNames, queueNames] = await Promise.all([
@@ -732,39 +738,38 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
     if (lastOpenedAt) {
       const d = new Date(lastOpenedAt);
       lastSessionText = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-        + " " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+        + "  ·  " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
     } else {
       lastSessionText = "Never opened";
     }
   }
 
-  // ── Layout constants ──
-  const W = 520;
-  const PAD = 22;
-  const ACCENT = 5;
-  const HEADER_H = 68;
-  const SEC_LABEL_H = 36;
-  const ROW_H = 30;
-  const HEAD_SIZE = 48;
-  const SEC_GAP = 10;
-  const BOTTOM_PAD = 18;
-
-  const accentColor = closed ? "#3d3f45" : isHigh ? "#f1c40f" : locked ? "#e67e22" : "#57f287";
+  // Colors
+  const accentColor = closed ? "#4f545c" : isHigh ? "#f0b429" : locked ? "#e8843a" : "#3ba55d";
   const statusLabel = closed ? "OFFLINE" : locked ? "LOCKED" : "OPEN";
-  const statusBg    = closed ? "#3d3f45" : locked ? "#e67e22" : "#57f287";
-  const statusFg    = (closed || locked) ? "#ffffff" : "#000000";
+  const statusBg    = closed ? "#4f545c" : locked ? "#e8843a" : "#3ba55d";
 
-  // Calculate total height
-  let contentH = HEADER_H + SEC_GAP;
+  // Layout
+  const W    = 500;
+  const PAD  = 22;
+  const AW   = 4;    // accent bar width
+  const X    = AW + PAD;
+  const HH   = 76;   // header height
+  const SH   = 26;   // section label row
+  const RH   = 32;   // per-player row
+  const HS   = 44;   // head size
+  const GAP  = 14;   // gap between sections
+
+  let bodyH = GAP;
   if (closed) {
-    contentH += SEC_LABEL_H + ROW_H * 2 + SEC_GAP; // "No Testers Online" + last session
+    bodyH += 38 + 20 + (lastSessionText ? 20 : 0) + GAP;
   } else {
-    contentH += SEC_LABEL_H + Math.max(testerIds.length, 1) * ROW_H + SEC_GAP; // testers
-    if (activeTesteeName) contentH += SEC_LABEL_H + HEAD_SIZE + 10 + SEC_GAP; // testing
-    contentH += SEC_LABEL_H + Math.max(count, 1) * ROW_H + SEC_GAP; // queue
-    if (isHigh) contentH += 28; // LT3 footer
+    bodyH += SH + Math.max(testerIds.length, 1) * RH + GAP;
+    if (activeTesteeName) bodyH += SH + HS + 8 + GAP;
+    bodyH += SH + Math.max(count, 1) * RH + GAP;
+    if (isHigh || locked) bodyH += 20;
   }
-  const H = contentH + BOTTOM_PAD;
+  const H = HH + bodyH + 14;
 
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
@@ -775,153 +780,142 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
 
   // Accent bar
   ctx.fillStyle = accentColor;
-  ctx.fillRect(0, 0, ACCENT, H);
+  ctx.fillRect(0, 0, AW, H);
 
   // Header background
-  ctx.fillStyle = "#2b2d31";
-  ctx.fillRect(ACCENT, 0, W - ACCENT, HEADER_H);
+  ctx.fillStyle = "#232428";
+  ctx.fillRect(AW, 0, W - AW, HH);
+  // Header bottom divider
+  ctx.fillStyle = "#2d2f34";
+  ctx.fillRect(AW, HH - 1, W - AW, 1);
 
-  // Gamemode + region title
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 22px sans-serif";
-  ctx.fillText(`${display}  —  ${region}${isHigh ? "  ★ HIGH" : ""}`, ACCENT + PAD, 30);
+  // Title
+  ctx.fillStyle = "#f2f3f5";
+  ctx.font = "700 20px Inter";
+  ctx.fillText(titleText, X, 34);
 
   // Subtitle
-  ctx.fillStyle = "#949ba4";
-  ctx.font = "14px sans-serif";
-  ctx.fillText("RyftTiers Queue", ACCENT + PAD, 52);
+  ctx.fillStyle = "#6d717a";
+  ctx.font = "400 13px Inter";
+  ctx.fillText("RyftTiers Tier Testing", X, 56);
 
   // Status badge
-  const badgeText = statusLabel;
-  ctx.font = "bold 12px sans-serif";
-  const badgeW = ctx.measureText(badgeText).width + 18;
-  const badgeX = W - PAD - badgeW;
-  const badgeY = 16;
-  const badgeH = 24;
+  ctx.font = "700 11px Inter";
+  const bw = ctx.measureText(statusLabel).width + 22;
+  const bx = W - PAD - bw;
+  const by = 22;
+  const bh = 24;
   ctx.fillStyle = statusBg;
-  roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 5);
+  roundRect(ctx, bx, by, bw, bh, 5);
   ctx.fill();
-  ctx.fillStyle = statusFg;
+  ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
-  ctx.fillText(badgeText, badgeX + badgeW / 2, badgeY + 16);
+  ctx.fillText(statusLabel, bx + bw / 2, by + 16);
   ctx.textAlign = "left";
 
-  // ── Content sections ──
-  let y = HEADER_H + SEC_GAP;
+  // Body
+  let y = HH + GAP;
 
-  function drawSection(label, rows) {
-    // Section label
-    ctx.fillStyle = "#949ba4";
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillText(label, ACCENT + PAD, y + 14);
-    // Thin separator line
-    ctx.strokeStyle = "#3d3f45";
+  function secLabel(label) {
+    ctx.fillStyle = "#6d717a";
+    ctx.font = "700 10px Inter";
+    ctx.fillText(label, X, y + 12);
+    const lw = ctx.measureText(label).width;
+    ctx.strokeStyle = "#2d2f34";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(ACCENT + PAD + ctx.measureText(label).width + 10, y + 10);
-    ctx.lineTo(W - PAD, y + 10);
+    ctx.moveTo(X + lw + 10, y + 8);
+    ctx.lineTo(W - PAD, y + 8);
     ctx.stroke();
-    y += SEC_LABEL_H;
-    for (const row of rows) {
-      row();
-      y += ROW_H;
-    }
-    y += SEC_GAP;
+    y += SH;
   }
 
   if (closed) {
-    // Closed state
-    ctx.fillStyle = "#f04747";
-    ctx.font = "bold 20px sans-serif";
-    ctx.fillText("No Testers Online", ACCENT + PAD, y + 24);
-    y += 40;
-    ctx.fillStyle = "#949ba4";
-    ctx.font = "14px sans-serif";
-    ctx.fillText("Testers will ping here when the queue opens.", ACCENT + PAD, y);
-    y += ROW_H;
+    ctx.fillStyle = "#6d717a";
+    ctx.font = "700 17px Inter";
+    ctx.fillText("Queue Offline", X, y + 22);
+    y += 38;
+    ctx.fillStyle = "#4a4d55";
+    ctx.font = "400 13px Inter";
+    ctx.fillText("Testers will ping here when the queue opens.", X, y);
+    y += 20;
     if (lastSessionText) {
-      ctx.fillStyle = "#6d6f78";
-      ctx.font = "13px sans-serif";
-      ctx.fillText(`Last session:  ${lastSessionText}`, ACCENT + PAD, y);
+      ctx.fillStyle = "#3c3f47";
+      ctx.font = "400 12px Inter";
+      ctx.fillText("Last session:  " + lastSessionText, X, y);
     }
   } else {
-    // Active Testers
-    drawSection("ACTIVE TESTERS", testerIds.length > 0
-      ? testerIds.map((_, i) => () => {
-          ctx.fillStyle = "#949ba4";
-          ctx.font = "bold 13px sans-serif";
-          ctx.fillText(`${i + 1}.`, ACCENT + PAD, y + 19);
-          ctx.fillStyle = "#dbdee1";
-          ctx.font = "15px sans-serif";
-          ctx.fillText(testerNames[i], ACCENT + PAD + 24, y + 19);
-        })
-      : [() => {
-          ctx.fillStyle = "#6d6f78";
-          ctx.font = "italic 14px sans-serif";
-          ctx.fillText("None online", ACCENT + PAD, y + 19);
-        }]
-    );
+    // Active testers
+    secLabel("ACTIVE TESTERS");
+    if (testerIds.length > 0) {
+      for (let i = 0; i < testerIds.length; i++) {
+        ctx.fillStyle = "#5d6068";
+        ctx.font = "700 12px Inter";
+        ctx.fillText(String(i + 1) + ".", X, y + 20);
+        ctx.fillStyle = "#dcddde";
+        ctx.font = "400 14px Inter";
+        ctx.fillText(testerNames[i], X + 22, y + 20);
+        y += RH;
+      }
+    } else {
+      ctx.fillStyle = "#4a4d55";
+      ctx.font = "400 13px Inter";
+      ctx.fillText("No testers online", X, y + 20);
+      y += RH;
+    }
+    y += GAP;
 
-    // Currently Testing
+    // Currently testing
     if (activeTesteeName) {
-      ctx.fillStyle = "#949ba4";
-      ctx.font = "bold 11px sans-serif";
-      ctx.fillText("CURRENTLY TESTING", ACCENT + PAD, y + 14);
-      ctx.strokeStyle = "#3d3f45";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ACCENT + PAD + ctx.measureText("CURRENTLY TESTING").width + 10, y + 10);
-      ctx.lineTo(W - PAD, y + 10);
-      ctx.stroke();
-      y += SEC_LABEL_H;
-
+      secLabel("CURRENTLY TESTING");
       if (headImg) {
         ctx.save();
         ctx.beginPath();
-        ctx.arc(ACCENT + PAD + HEAD_SIZE / 2, y + HEAD_SIZE / 2, HEAD_SIZE / 2, 0, Math.PI * 2);
+        ctx.arc(X + HS / 2, y + HS / 2, HS / 2, 0, Math.PI * 2);
         ctx.clip();
-        ctx.drawImage(headImg, ACCENT + PAD, y, HEAD_SIZE, HEAD_SIZE);
+        ctx.drawImage(headImg, X, y, HS, HS);
         ctx.restore();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 17px sans-serif";
-        ctx.fillText(activeTesteeName, ACCENT + PAD + HEAD_SIZE + 14, y + HEAD_SIZE / 2 + 6);
+        ctx.fillStyle = "#f2f3f5";
+        ctx.font = "600 16px Inter";
+        ctx.fillText(activeTesteeName, X + HS + 12, y + HS / 2 + 6);
       } else {
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 17px sans-serif";
-        ctx.fillText(activeTesteeName, ACCENT + PAD, y + 24);
+        ctx.fillStyle = "#f2f3f5";
+        ctx.font = "600 16px Inter";
+        ctx.fillText(activeTesteeName, X, y + HS / 2 + 4);
       }
-      y += HEAD_SIZE + 10 + SEC_GAP;
+      y += HS + 8 + GAP;
     }
 
     // Queue
-    const queueLabel = count > 0 ? `QUEUE — ${count} WAITING` : "QUEUE";
-    drawSection(queueLabel, count > 0
-      ? queuePlayerIds.map((_, i) => () => {
-          ctx.fillStyle = "#949ba4";
-          ctx.font = "bold 13px sans-serif";
-          ctx.fillText(`${i + 1}.`, ACCENT + PAD, y + 19);
-          ctx.fillStyle = "#dbdee1";
-          ctx.font = "15px sans-serif";
-          ctx.fillText(queueNames[i], ACCENT + PAD + 24, y + 19);
-        })
-      : [() => {
-          ctx.fillStyle = "#6d6f78";
-          ctx.font = "italic 14px sans-serif";
-          ctx.fillText("Empty — join with the button below", ACCENT + PAD, y + 19);
-        }]
-    );
+    const qLabel = count > 0 ? "QUEUE  —  " + count + " WAITING" : "QUEUE";
+    secLabel(qLabel);
+    if (count > 0) {
+      for (let i = 0; i < queuePlayerIds.length; i++) {
+        ctx.fillStyle = "#5d6068";
+        ctx.font = "700 12px Inter";
+        ctx.fillText(String(i + 1) + ".", X, y + 20);
+        ctx.fillStyle = "#dcddde";
+        ctx.font = "400 14px Inter";
+        ctx.fillText(queueNames[i], X + 22, y + 20);
+        y += RH;
+      }
+    } else {
+      ctx.fillStyle = "#4a4d55";
+      ctx.font = "400 13px Inter";
+      ctx.fillText("Empty — use the button below to join", X, y + 20);
+      y += RH;
+    }
 
-    // High queue note
-    if (isHigh) {
-      const noteY = H - BOTTOM_PAD - 14;
-      ctx.fillStyle = "#f1c40f";
-      ctx.font = "12px sans-serif";
-      ctx.fillText(locked ? "★ LT3+ only  •  Locked — not accepting new joins" : "★ LT3+ players only", ACCENT + PAD, noteY);
-    } else if (locked) {
-      const noteY = H - BOTTOM_PAD - 14;
-      ctx.fillStyle = "#e67e22";
-      ctx.font = "12px sans-serif";
-      ctx.fillText("Locked — not accepting new joins right now", ACCENT + PAD, noteY);
+    // Footer note
+    if (isHigh || locked) {
+      y += 6;
+      ctx.fillStyle = isHigh ? "#f0b429" : "#e8843a";
+      ctx.font = "400 11px Inter";
+      ctx.fillText(
+        isHigh ? (locked ? "★ LT3+ only  ·  Locked" : "★ LT3+ players only")
+               : "Locked — not accepting new joins",
+        X, y + 12
+      );
     }
   }
 
@@ -1020,21 +1014,13 @@ function buildTicketButtons(gamemode, testeeId) {
 }
 
 async function refreshQueueMessage(interaction, queueKey, gamemode) {
-  await interaction.message.edit({
-    files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)],
-    attachments: [],
-    embeds: [],
-    components: await buildQueueButtons(queueKey),
-  });
+  suppressRealtimeFor(queueKey);
+  await postFreshQueueMessage(interaction.channel, queueKey, gamemode);
 }
 
 async function refreshHighQueueMessage(interaction, highKey, gamemode) {
-  await interaction.message.edit({
-    files: [await buildQueueAttachment(highKey, gamemode, interaction.guild, { isHigh: true })],
-    attachments: [],
-    embeds: [],
-    components: await buildHighQueueButtons(highKey),
-  });
+  suppressRealtimeFor(highKey);
+  await postFreshQueueMessage(interaction.channel, highKey, gamemode, { isHigh: true });
 }
 
 // Keys the bot recently wrote to queue_closed itself (open/close from
@@ -1096,19 +1082,11 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
     const baseKey = `${info.gamemode}:${info.region}`;
     if (info.isHigh) {
       const highKey = `${baseKey}:high`;
-      await queueMessage.edit({
-        files: [await buildQueueAttachment(highKey, info.gamemode, guild, { isHigh: true })],
-        attachments: [],
-        embeds: [],
-        components: await buildHighQueueButtons(highKey),
-      });
+      suppressRealtimeFor(highKey);
+      await postFreshQueueMessage(queueChannel, highKey, info.gamemode, { isHigh: true });
     } else {
-      await queueMessage.edit({
-        files: [await buildQueueAttachment(baseKey, info.gamemode, guild)],
-        attachments: [],
-        embeds: [],
-        components: await buildQueueButtons(baseKey),
-      });
+      suppressRealtimeFor(baseKey);
+      await postFreshQueueMessage(queueChannel, baseKey, info.gamemode);
     }
   } catch (err) {
     console.error("Couldn't refresh queue message after ticket closed:", err.message);
@@ -1819,12 +1797,9 @@ client.on("interactionCreate", async (interaction) => {
     try {
       const stored = getQueueMessage(queueKey);
       if (stored) {
-        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
-        const queueMessage = await queueChannel.messages.fetch(stored.messageId);
-        await queueMessage.edit({
-          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
-          components: await buildQueueButtons(queueKey),
-        });
+        const queueCh = await interaction.guild.channels.fetch(stored.channelId);
+        suppressRealtimeFor(queueKey);
+        await postFreshQueueMessage(queueCh, queueKey, gamemode);
       }
     } catch (err) {
       console.error("Couldn't refresh queue message after jointesting:", err.message);
@@ -1879,12 +1854,9 @@ client.on("interactionCreate", async (interaction) => {
     try {
       const stored = getQueueMessage(queueKey);
       if (stored) {
-        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
-        const queueMessage = await queueChannel.messages.fetch(stored.messageId);
-        await queueMessage.edit({
-          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
-          components: await buildQueueButtons(queueKey),
-        });
+        const queueCh = await interaction.guild.channels.fetch(stored.channelId);
+        suppressRealtimeFor(queueKey);
+        await postFreshQueueMessage(queueCh, queueKey, gamemode);
       }
     } catch (err) {
       console.error("Couldn't refresh queue message after leavetesting:", err.message);
@@ -1929,12 +1901,9 @@ client.on("interactionCreate", async (interaction) => {
     try {
       const stored = getQueueMessage(queueKey);
       if (stored) {
-        const queueChannel = await interaction.guild.channels.fetch(stored.channelId);
-        const queueMsg = await queueChannel.messages.fetch(stored.messageId);
-        await queueMsg.edit({
-          files: [await buildQueueAttachment(queueKey, gamemode, interaction.guild)], attachments: [], embeds: [],
-          components: await buildQueueButtons(queueKey),
-        });
+        const queueCh = await interaction.guild.channels.fetch(stored.channelId);
+        suppressRealtimeFor(queueKey);
+        await postFreshQueueMessage(queueCh, queueKey, gamemode);
       }
     } catch (err) {
       console.error("Couldn't refresh queue after removetester:", err.message);
