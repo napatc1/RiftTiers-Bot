@@ -1389,31 +1389,29 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
   const status = passed ? `Promoted to **${tier}**` : `Failed **${tier}**`;
   const statusVerb = passed ? "✅ Passed" : "❌ Failed";
 
-  // Header line (plain message above embed, matching the format in the screenshot)
   const playerMention = discordId ? `<@${discordId}>` : `**${username}**`;
-  const headerLine = `${playerMention} **| ${gamemode.toUpperCase()} - ${statusVerb} ${tier}**${isManual ? " *(manual)*" : ""}`;
-
-  // Build embed description
-  let desc = `**Player:** ${username}\n**Region:** ${region}\n**Result:** ${changeText}\n`;
-  if (testerTag) desc += `**Tested by:** ${testerTag}\n`;
-
   const fightLines = parseFightSections(fightResultsRaw);
-  if (fightLines.length > 0) {
-    desc += `\n**Fights:**\n${fightLines.map((l) => `> ${l}`).join("\n")}`;
-  }
-
   const color = passed ? 0x4ade80 : 0xf87171;
 
+  const embed = new EmbedBuilder()
+    .setTitle(`${gamemode.toUpperCase()} — ${statusVerb} ${tier}${isManual ? " *(manual)*" : ""}`)
+    .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
+    .setColor(color)
+    .setTimestamp()
+    .addFields(
+      { name: "Player", value: username, inline: true },
+      { name: "Region", value: region, inline: true },
+      { name: "​", value: "​", inline: true },
+      { name: "Old tier", value: previousTier || "Untested", inline: true },
+      { name: "New tier", value: tier, inline: true },
+      { name: "​", value: "​", inline: true },
+    );
+  if (testerTag) embed.addFields({ name: "Tester", value: testerTag, inline: true });
+  if (fightLines.length > 0) embed.addFields({ name: "Fights", value: fightLines.map((l) => `> ${l}`).join("\n") });
+
   await channel.send({
-    content: headerLine,
-    embeds: [
-      new EmbedBuilder()
-        .setDescription(desc)
-        .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
-        .setImage(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
-        .setColor(color)
-        .setTimestamp(),
-    ],
+    content: playerMention,
+    embeds: [embed],
   });
 }
 
@@ -2777,13 +2775,16 @@ client.on("interactionCreate", async (interaction) => {
           await resultsChannel.send({
             embeds: [
               new EmbedBuilder()
-                .setTitle("Manual tier change")
-                .setDescription(
-                  `**${username}** in **${gamemode.toUpperCase()}**: ${changeText}\nChanged by: <@${interaction.user.id}>`
-                )
-                .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
-                .setImage(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
-                .setColor(0xffd54a),
+                .setTitle(`${gamemode.toUpperCase()} — Manual change`)
+                .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
+                .setColor(0xffd54a)
+                .addFields(
+                  { name: "Player", value: username, inline: true },
+                  { name: "Changed by", value: `<@${interaction.user.id}>`, inline: true },
+                  { name: "​", value: "​", inline: true },
+                  { name: "Old tier", value: previousTier || "Untested", inline: true },
+                  { name: "New tier", value: tier, inline: true },
+                ),
             ],
           });
         }
@@ -3694,15 +3695,21 @@ client.on("interactionCreate", async (interaction) => {
         if (resultsChannel) {
           const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
           await resultsChannel.send({
+            content: testeeId ? `<@${testeeId}>` : null,
             embeds: [
               new EmbedBuilder()
-                .setTitle("Tier test result")
-                .setDescription(
-                  `**${name}**${testeeId ? ` (<@${testeeId}>)` : ""} in **${gamemode.toUpperCase()}**: ${changeText}\nRegion: ${region}\nTested by: <@${interaction.user.id}>`
-                )
-                .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(name)}/128`)
-                .setImage(`https://mc-heads.net/body/${encodeURIComponent(name)}`)
-                .setColor(0xffd54a),
+                .setTitle(`${gamemode.toUpperCase()} result`)
+                .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(name)}`)
+                .setColor(0xffd54a)
+                .addFields(
+                  { name: "Player", value: name, inline: true },
+                  { name: "Region", value: region, inline: true },
+                  { name: "​", value: "​", inline: true },
+                  { name: "Old tier", value: previousTier || "Untested", inline: true },
+                  { name: "New tier", value: changeText.includes("→") ? changeText.split(" → ")[1] : tier, inline: true },
+                  { name: "​", value: "​", inline: true },
+                  { name: "Tester", value: `<@${interaction.user.id}>`, inline: true },
+                ),
             ],
           });
         }
