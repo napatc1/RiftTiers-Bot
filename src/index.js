@@ -175,29 +175,10 @@ function isRestricted(member) {
 // delete the VC when the ticket closes, and clean up when it goes empty.
 const screenshareVCs = new Map();
 
-// Test waitlist queue — userId -> displayName, plus a pointer to the live message.
-const testWaitlist = new Map();
-let testWaitlistMsgId = null;
+// Test queue channel ID — set when /util queuetest creates the channel.
 let testWaitlistChannelId = null;
-
-async function refreshTestWaitlistMessage(guild) {
-  if (!testWaitlistChannelId || !testWaitlistMsgId) return;
-  const ch = guild.channels.cache.get(testWaitlistChannelId);
-  if (!ch) return;
-  const msg = await ch.messages.fetch(testWaitlistMsgId).catch(() => null);
-  if (!msg) return;
-  const entries = [...testWaitlist.entries()];
-  const embed = new EmbedBuilder()
-    .setTitle("Test Waitlist Queue")
-    .setDescription(
-      entries.length === 0
-        ? "No one in the queue — click **Join Queue** to add yourself."
-        : entries.map(([, name], i) => `**${i + 1}.** ${name}`).join("\n")
-    )
-    .setColor(0x3fa0f5)
-    .setFooter({ text: `${entries.length} in queue` });
-  await msg.edit({ embeds: [embed] }).catch(() => {});
-}
+const TEST_QUEUE_KEY = "test:NA";
+const TEST_QUEUE_GAMEMODE = "vanilla";
 
 function isTester(member) {
   return member.roles.cache.some((r) =>
@@ -1659,17 +1640,7 @@ client.on("interactionCreate", async (interaction) => {
         parent: TEST_QUEUE_CATEGORY_ID,
       });
       testWaitlistChannelId = ch.id;
-      const embed = new EmbedBuilder()
-        .setTitle("Test Waitlist Queue")
-        .setDescription("No one in the queue — click **Join Queue** to add yourself.")
-        .setColor(0x3fa0f5)
-        .setFooter({ text: "0 in queue" });
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("testqueue_join").setLabel("Join Queue").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId("testqueue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary),
-      );
-      const msg = await ch.send({ embeds: [embed], components: [row] });
-      testWaitlistMsgId = msg.id;
+      await postFreshQueueMessage(ch, TEST_QUEUE_KEY, TEST_QUEUE_GAMEMODE);
       return interaction.editReply({ content: `Test waitlist queue created: ${ch}` });
     } catch (err) {
       console.error("[queuetest]", err.message);
@@ -2875,25 +2846,6 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---------- buttons ----------
   if (interaction.isButton()) {
-    // ---------- test waitlist queue ----------
-    if (interaction.customId === "testqueue_join") {
-      if (testWaitlist.has(interaction.user.id)) {
-        return interaction.reply({ content: "You're already in the queue.", ephemeral: true });
-      }
-      testWaitlist.set(interaction.user.id, interaction.member.displayName);
-      await refreshTestWaitlistMessage(interaction.guild);
-      return interaction.reply({ content: "You've joined the waitlist queue.", ephemeral: true });
-    }
-
-    if (interaction.customId === "testqueue_leave") {
-      if (!testWaitlist.has(interaction.user.id)) {
-        return interaction.reply({ content: "You're not in the queue.", ephemeral: true });
-      }
-      testWaitlist.delete(interaction.user.id);
-      await refreshTestWaitlistMessage(interaction.guild);
-      return interaction.reply({ content: "You've left the waitlist queue.", ephemeral: true });
-    }
-
     // ---------- #request-support: open a ticket ----------
     if (interaction.customId === "request_open_ticket") {
       return interaction.reply({
@@ -3273,6 +3225,23 @@ client.on("interactionCreate", async (interaction) => {
       } catch (err) {
         console.error("[screenshare] failed:", err.message);
         await interaction.editReply({ content: "Something went wrong creating the voice channel." });
+      }
+      return;
+    }
+
+    // ---------- test queue channel ----------
+    if (testWaitlistChannelId && interaction.channel.id === testWaitlistChannelId) {
+      if (interaction.customId === "queue_join") {
+        await interaction.deferReply({ ephemeral: true });
+        const joined = await joinQueue(TEST_QUEUE_KEY, interaction.user.id, "NA");
+        await postFreshQueueMessage(interaction.channel, TEST_QUEUE_KEY, TEST_QUEUE_GAMEMODE);
+        return interaction.editReply({ content: joined ? "You joined the queue." : "You're already in the queue." });
+      }
+      if (interaction.customId === "queue_leave") {
+        await interaction.deferReply({ ephemeral: true });
+        const left = await leaveQueue(TEST_QUEUE_KEY, interaction.user.id);
+        await postFreshQueueMessage(interaction.channel, TEST_QUEUE_KEY, TEST_QUEUE_GAMEMODE);
+        return interaction.editReply({ content: left ? "You left the queue." : "You weren't in the queue." });
       }
       return;
     }
