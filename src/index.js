@@ -1410,6 +1410,7 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
       new EmbedBuilder()
         .setDescription(desc)
         .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
+        .setImage(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
         .setColor(color)
         .setTimestamp(),
     ],
@@ -2781,6 +2782,7 @@ client.on("interactionCreate", async (interaction) => {
                   `**${username}** in **${gamemode.toUpperCase()}**: ${changeText}\nChanged by: <@${interaction.user.id}>`
                 )
                 .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
+                .setImage(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
                 .setColor(0xffd54a),
             ],
           });
@@ -3699,6 +3701,7 @@ client.on("interactionCreate", async (interaction) => {
                   `**${name}**${testeeId ? ` (<@${testeeId}>)` : ""} in **${gamemode.toUpperCase()}**: ${changeText}\nRegion: ${region}\nTested by: <@${interaction.user.id}>`
                 )
                 .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(name)}/128`)
+                .setImage(`https://mc-heads.net/body/${encodeURIComponent(name)}`)
                 .setColor(0xffd54a),
             ],
           });
