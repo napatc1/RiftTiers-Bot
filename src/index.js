@@ -1286,10 +1286,13 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
         const e = new EmbedBuilder()
           .setTitle(`${gamemode.toUpperCase()} test in progress`)
           .setDescription(
-            `Tester: <@${testerMember.id}>\nTestee: <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
+            `**Tester:** <@${testerMember.id}>\n**Testee:** <@${testeeId}>\n${testeeInfoLine}\nWhen the test is done, click **Submit Result** to save the tier and close this ticket. Only testers and the testee can see this channel.\n\n_This ticket closes automatically after 2 hours if left open._`
           )
           .setColor(0xffd54a);
-        if (testeeUsername) e.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(testeeUsername)}/128`);
+        if (testeeUsername) {
+          e.setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(testeeUsername)}/128`);
+          e.setImage(`https://mc-heads.net/body/${encodeURIComponent(testeeUsername)}/right`);
+        }
         return e;
       })(),
     ],
@@ -2570,6 +2573,7 @@ client.on("interactionCreate", async (interaction) => {
     const announcementsChannel = await interaction.guild.channels.fetch("1557857690091262002").catch(() => null);
     if (announcementsChannel) {
       await announcementsChannel.send({
+        content: "@everyone",
         embeds: [
           new EmbedBuilder()
             .setTitle(title)
@@ -2776,6 +2780,7 @@ client.on("interactionCreate", async (interaction) => {
                 .setDescription(
                   `**${username}** in **${gamemode.toUpperCase()}**: ${changeText}\nChanged by: <@${interaction.user.id}>`
                 )
+                .setThumbnail(`https://mc-heads.net/avatar/${encodeURIComponent(username)}/128`)
                 .setColor(0xffd54a),
             ],
           });
