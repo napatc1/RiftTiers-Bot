@@ -175,6 +175,30 @@ function isRestricted(member) {
 // delete the VC when the ticket closes, and clean up when it goes empty.
 const screenshareVCs = new Map();
 
+// Test waitlist queue — userId -> displayName, plus a pointer to the live message.
+const testWaitlist = new Map();
+let testWaitlistMsgId = null;
+let testWaitlistChannelId = null;
+
+async function refreshTestWaitlistMessage(guild) {
+  if (!testWaitlistChannelId || !testWaitlistMsgId) return;
+  const ch = guild.channels.cache.get(testWaitlistChannelId);
+  if (!ch) return;
+  const msg = await ch.messages.fetch(testWaitlistMsgId).catch(() => null);
+  if (!msg) return;
+  const entries = [...testWaitlist.entries()];
+  const embed = new EmbedBuilder()
+    .setTitle("Test Waitlist Queue")
+    .setDescription(
+      entries.length === 0
+        ? "No one in the queue — click **Join Queue** to add yourself."
+        : entries.map(([, name], i) => `**${i + 1}.** ${name}`).join("\n")
+    )
+    .setColor(0x3fa0f5)
+    .setFooter({ text: `${entries.length} in queue` });
+  await msg.edit({ embeds: [embed] }).catch(() => {});
+}
+
 function isTester(member) {
   return member.roles.cache.some((r) =>
     testerRoleNames.includes(r.name.toLowerCase())
@@ -1620,6 +1644,39 @@ client.on("interactionCreate", async (interaction) => {
     return interaction.editReply({ content: `Queue closed. Testers and queue positions are preserved — use the **Open Queue** button to reopen.` });
   }
 
+  // /util queuetest — creates a test waitlist queue channel in the designated category
+  if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "queuetest") {
+    const roles = computeRoleFlags(interaction.member);
+    if (!roles.isManager && !roles.isOwner) {
+      return interaction.reply({ content: "Only managers and owners can use queuetest.", ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const TEST_QUEUE_CATEGORY_ID = "1557858151586332723";
+    try {
+      const ch = await interaction.guild.channels.create({
+        name: "test-waitlist-queue",
+        type: ChannelType.GuildText,
+        parent: TEST_QUEUE_CATEGORY_ID,
+      });
+      testWaitlistChannelId = ch.id;
+      const embed = new EmbedBuilder()
+        .setTitle("Test Waitlist Queue")
+        .setDescription("No one in the queue — click **Join Queue** to add yourself.")
+        .setColor(0x3fa0f5)
+        .setFooter({ text: "0 in queue" });
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("testqueue_join").setLabel("Join Queue").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("testqueue_leave").setLabel("Leave Queue").setStyle(ButtonStyle.Secondary),
+      );
+      const msg = await ch.send({ embeds: [embed], components: [row] });
+      testWaitlistMsgId = msg.id;
+      return interaction.editReply({ content: `Test waitlist queue created: ${ch}` });
+    } catch (err) {
+      console.error("[queuetest]", err.message);
+      return interaction.editReply({ content: `Failed to create channel: ${err.message}` });
+    }
+  }
+
   // /util posthightestpanel — posts the high tier test request panel in the current channel
   if (interaction.isChatInputCommand() && interaction.commandName === "util" && interaction.options.getString("action") === "posthightestpanel") {
     if (!canManageCooldowns(interaction.member)) {
@@ -2818,6 +2875,25 @@ client.on("interactionCreate", async (interaction) => {
 
   // ---------- buttons ----------
   if (interaction.isButton()) {
+    // ---------- test waitlist queue ----------
+    if (interaction.customId === "testqueue_join") {
+      if (testWaitlist.has(interaction.user.id)) {
+        return interaction.reply({ content: "You're already in the queue.", ephemeral: true });
+      }
+      testWaitlist.set(interaction.user.id, interaction.member.displayName);
+      await refreshTestWaitlistMessage(interaction.guild);
+      return interaction.reply({ content: "You've joined the waitlist queue.", ephemeral: true });
+    }
+
+    if (interaction.customId === "testqueue_leave") {
+      if (!testWaitlist.has(interaction.user.id)) {
+        return interaction.reply({ content: "You're not in the queue.", ephemeral: true });
+      }
+      testWaitlist.delete(interaction.user.id);
+      await refreshTestWaitlistMessage(interaction.guild);
+      return interaction.reply({ content: "You've left the waitlist queue.", ephemeral: true });
+    }
+
     // ---------- #request-support: open a ticket ----------
     if (interaction.customId === "request_open_ticket") {
       return interaction.reply({

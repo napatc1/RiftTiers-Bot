@@ -30,7 +30,8 @@ const commands = [
           { name: "postapplications",    value: "postapplications" },
           { name: "lockdown",            value: "lockdown" },
           { name: "unlockdown",          value: "unlockdown" },
-          { name: "closequeue",          value: "closequeue" }
+          { name: "closequeue",          value: "closequeue" },
+          { name: "queuetest",           value: "queuetest" }
         )
     )
     .addUserOption((opt) =>
