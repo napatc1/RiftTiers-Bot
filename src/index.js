@@ -20,11 +20,13 @@ const {
   AttachmentBuilder,
 } = require("discord.js");
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
-// Register Inter font family (available on the server) for canvas rendering.
-GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Regular.otf", "Inter");
-GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Medium.otf", "Inter");
-GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-SemiBold.otf", "Inter");
-GlobalFonts.registerFromPath("/usr/share/fonts/opentype/inter/Inter-Bold.otf", "Inter");
+const path = require("path");
+const PJS_DIR = path.join(__dirname, "../node_modules/@fontsource/plus-jakarta-sans/files");
+GlobalFonts.registerFromPath(path.join(PJS_DIR, "plus-jakarta-sans-latin-400-normal.woff"), "PlusJakartaSans");
+GlobalFonts.registerFromPath(path.join(PJS_DIR, "plus-jakarta-sans-latin-500-normal.woff"), "PlusJakartaSans");
+GlobalFonts.registerFromPath(path.join(PJS_DIR, "plus-jakarta-sans-latin-600-normal.woff"), "PlusJakartaSans");
+GlobalFonts.registerFromPath(path.join(PJS_DIR, "plus-jakarta-sans-latin-700-normal.woff"), "PlusJakartaSans");
+GlobalFonts.registerFromPath(path.join(PJS_DIR, "plus-jakarta-sans-latin-800-normal.woff"), "PlusJakartaSans");
 const commands = require("./commands");
 const {
   GAMEMODE_CHANNELS,
@@ -754,44 +756,44 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
 
   // ── Website design tokens ─────────────────────────────────────────────────
   const BG        = "#060810";
-  const PANEL     = "#0f1318";
-  const LINE      = "rgba(255,255,255,0.08)";
-  const TEXT      = "#e9eaec";
-  const TEXT_DIM  = "#838a94";
+  const PANEL     = "#0d1117";
+  const LINE      = "rgba(255,255,255,0.07)";
+  const TEXT      = "#f0f1f3";
+  const TEXT_DIM  = "#6b7280";
+  const TEXT_MED  = "#9ca3af";
   const ACCENT    = "#3fa0f5";
-  const ACCENT_DIM = "rgba(63,160,245,0.15)";
-  const ACCENT_BORDER = "rgba(63,160,245,0.3)";
-  const EMBER     = "#ff7a45";
-  const EMBER_DIM = "rgba(255,122,69,0.12)";
-  const EMBER_BDR = "rgba(255,122,69,0.3)";
-  const ROW_LINE  = "rgba(255,255,255,0.07)";
+  const ACCENT_DIM = "rgba(63,160,245,0.12)";
+  const ACCENT_BORDER = "rgba(63,160,245,0.25)";
+  const EMBER     = "#f97316";
+  const EMBER_DIM = "rgba(249,115,22,0.10)";
+  const EMBER_BDR = "rgba(249,115,22,0.28)";
+  const ROW_LINE  = "rgba(255,255,255,0.055)";
 
   const statusLabel = closed ? "OFFLINE" : locked ? "LOCKED" : isHigh ? "HIGH · OPEN" : "OPEN";
-  const statusAccent = closed ? "rgba(131,138,148,0.5)" : locked ? EMBER : ACCENT;
-  const statusBg     = closed ? "rgba(131,138,148,0.12)" : locked ? EMBER_DIM : ACCENT_DIM;
-  const statusBdr    = closed ? "rgba(131,138,148,0.25)" : locked ? EMBER_BDR : ACCENT_BORDER;
+  const statusAccent = closed ? "#6b7280" : locked ? EMBER : ACCENT;
+  const statusBg     = closed ? "rgba(107,114,128,0.10)" : locked ? EMBER_DIM : ACCENT_DIM;
+  const statusBdr    = closed ? "rgba(107,114,128,0.20)" : locked ? EMBER_BDR : ACCENT_BORDER;
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  const W    = 560;
-  const PAD  = 22;
-  const CR   = 14;
-  const COL  = PAD + 300 + 16;  // x-start of right column (testers)
-  const ROW_H = 36;
-  const CHIP_H = 22;
+  const W      = 580;
+  const PAD    = 24;
+  const CR     = 16;
+  const COL    = PAD + 308 + 16;
+  const ROW_H  = 38;
+  const CHIP_H = 24;
 
-  // Height calculation
-  const HEADER_H = 68;
+  const HEADER_H = 76;
 
   let bodyH = PAD;
   if (closed) {
-    bodyH += 36 + 12 + 16 + (lastSessionText ? 16 : 0) + PAD;
+    bodyH += 40 + 14 + 18 + (lastSessionText ? 18 : 0) + PAD;
   } else {
-    const COL_HEAD = 24;
+    const COL_HEAD = 26;
     const qRows = Math.max(count, 1) * ROW_H;
-    const tChipRows = Math.ceil(Math.max(testerIds.length, 1) / 4) * (CHIP_H + 6);
+    const tChipRows = Math.ceil(Math.max(testerIds.length, 1) / 4) * (CHIP_H + 8);
     bodyH += COL_HEAD + Math.max(qRows, tChipRows);
-    if (activeTesteeName) bodyH += ROW_H + 12;
-    if (isHigh || locked) bodyH += 20;
+    if (activeTesteeName) bodyH += ROW_H + 14;
+    if (isHigh || locked) bodyH += 22;
     bodyH += PAD;
   }
 
@@ -800,21 +802,19 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  // ── Background: dark navy with gradient glow blobs ────────────────────────
+  // ── Background ────────────────────────────────────────────────────────────
   ctx.fillStyle = BG;
   ctx.fillRect(0, 0, W, H);
 
-  // Blue glow blob (top-right)
-  const g1 = ctx.createRadialGradient(W * 0.85, H * 0.1, 0, W * 0.85, H * 0.1, W * 0.6);
-  g1.addColorStop(0, "rgba(56,120,240,0.28)");
+  const g1 = ctx.createRadialGradient(W * 0.88, H * 0.08, 0, W * 0.88, H * 0.08, W * 0.65);
+  g1.addColorStop(0, "rgba(56,120,240,0.22)");
   g1.addColorStop(1, "rgba(56,120,240,0)");
   ctx.fillStyle = g1;
   ctx.fillRect(0, 0, W, H);
 
-  // Purple glow blob (bottom-left)
-  const g2 = ctx.createRadialGradient(W * 0.05, H * 0.9, 0, W * 0.05, H * 0.9, W * 0.5);
-  g2.addColorStop(0, "rgba(120,60,220,0.18)");
-  g2.addColorStop(1, "rgba(120,60,220,0)");
+  const g2 = ctx.createRadialGradient(W * 0.05, H * 0.92, 0, W * 0.05, H * 0.92, W * 0.48);
+  g2.addColorStop(0, "rgba(109,40,217,0.14)");
+  g2.addColorStop(1, "rgba(109,40,217,0)");
   ctx.fillStyle = g2;
   ctx.fillRect(0, 0, W, H);
 
@@ -828,42 +828,46 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
   ctx.stroke();
 
   // ── Header ────────────────────────────────────────────────────────────────
-  // "Ryft" white + "Tiers" blue wordmark
-  ctx.font = "700 11px Inter";
-  ctx.fillStyle = "rgba(255,255,255,0.45)";
-  ctx.fillText("Ryft", PAD, PAD + 13);
+  ctx.textBaseline = "alphabetic";
+
+  // Wordmark: "Ryft" dim + "Tiers" accent
+  ctx.font = "600 11px PlusJakartaSans";
+  ctx.letterSpacing = "0.5px";
+  ctx.fillStyle = "rgba(255,255,255,0.38)";
+  ctx.fillText("Ryft", PAD, PAD + 14);
   const ryftW = ctx.measureText("Ryft").width;
   ctx.fillStyle = ACCENT;
-  ctx.fillText("Tiers", PAD + ryftW, PAD + 13);
+  ctx.fillText("Tiers", PAD + ryftW, PAD + 14);
+  ctx.letterSpacing = "0px";
 
-  // Gamemode title
+  // Gamemode title — bigger, heavier
   const gmLabel = rawName.toUpperCase();
-  ctx.font = "700 19px Inter";
+  ctx.font = "800 22px PlusJakartaSans";
   ctx.fillStyle = TEXT;
-  ctx.fillText(gmLabel, PAD, PAD + 13 + 6 + 19);
-
-  // Region tag after title
+  ctx.fillText(gmLabel, PAD, PAD + 14 + 7 + 22);
   const gmW = ctx.measureText(gmLabel).width;
-  ctx.font = "600 13px Inter";
-  ctx.fillStyle = TEXT_DIM;
-  ctx.fillText("· " + region + (isHigh ? " · HIGH" : ""), PAD + gmW + 10, PAD + 13 + 6 + 19);
 
-  // Status chip (top-right)
-  ctx.font = "700 10px Inter";
-  const chipW = ctx.measureText(statusLabel).width + 20;
-  const chipH2 = 22;
+  // Region tag
+  ctx.font = "500 14px PlusJakartaSans";
+  ctx.fillStyle = TEXT_DIM;
+  ctx.fillText("· " + region + (isHigh ? " · HIGH" : ""), PAD + gmW + 10, PAD + 14 + 7 + 22);
+
+  // Status chip
+  ctx.font = "700 10px PlusJakartaSans";
+  const chipW = ctx.measureText(statusLabel).width + 22;
+  const chipH2 = 24;
   const chipX = W - PAD - chipW;
-  const chipY = PAD + 2;
+  const chipY = PAD + 4;
   ctx.fillStyle = statusBg;
-  roundRect(ctx, chipX, chipY, chipW, chipH2, 11);
+  roundRect(ctx, chipX, chipY, chipW, chipH2, 12);
   ctx.fill();
   ctx.strokeStyle = statusBdr;
   ctx.lineWidth = 1;
-  roundRect(ctx, chipX + 0.5, chipY + 0.5, chipW - 1, chipH2 - 1, 11);
+  roundRect(ctx, chipX + 0.5, chipY + 0.5, chipW - 1, chipH2 - 1, 12);
   ctx.stroke();
   ctx.fillStyle = statusAccent;
   ctx.textAlign = "center";
-  ctx.fillText(statusLabel, chipX + chipW / 2, chipY + 15);
+  ctx.fillText(statusLabel, chipX + chipW / 2, chipY + 16);
   ctx.textAlign = "left";
 
   // Header divider
@@ -876,43 +880,45 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
   if (closed) {
     // Ember closed banner
     ctx.fillStyle = EMBER_DIM;
-    roundRect(ctx, PAD, y, W - PAD * 2, 36, 8);
+    roundRect(ctx, PAD, y, W - PAD * 2, 40, 10);
     ctx.fill();
     ctx.strokeStyle = EMBER_BDR;
     ctx.lineWidth = 1;
-    roundRect(ctx, PAD + 0.5, y + 0.5, W - PAD * 2 - 1, 35, 8);
+    roundRect(ctx, PAD + 0.5, y + 0.5, W - PAD * 2 - 1, 39, 10);
     ctx.stroke();
     ctx.fillStyle = EMBER;
-    ctx.font = "600 13px Inter";
-    ctx.fillText("Queue is closed", PAD + 14, y + 23);
-    y += 36 + 12;
+    ctx.font = "600 13px PlusJakartaSans";
+    ctx.fillText("Queue is closed", PAD + 16, y + 26);
+    y += 40 + 14;
 
-    ctx.fillStyle = TEXT_DIM;
-    ctx.font = "400 12px Inter";
+    ctx.fillStyle = TEXT_MED;
+    ctx.font = "400 13px PlusJakartaSans";
     ctx.fillText("Testers will ping here when the queue opens.", PAD, y);
-    y += 16;
+    y += 18;
 
     if (lastSessionText) {
-      ctx.fillStyle = "rgba(131,138,148,0.45)";
-      ctx.font = "400 11px Inter";
+      ctx.fillStyle = TEXT_DIM;
+      ctx.font = "400 11px PlusJakartaSans";
       ctx.fillText("Last session: " + lastSessionText, PAD, y);
     }
   } else {
     // ── Column headers ────────────────────────────────────────────────────
     const qLabel = count > 0 ? `QUEUE — ${count} WAITING` : "QUEUE";
+    ctx.font = "700 10px PlusJakartaSans";
     ctx.fillStyle = TEXT_DIM;
-    ctx.font = "600 10px Inter";
-    ctx.fillText(qLabel, PAD, y + 13);
-    ctx.fillText("TESTERS ONLINE", COL, y + 13);
-    y += 24;
+    ctx.letterSpacing = "0.8px";
+    ctx.fillText(qLabel, PAD, y + 14);
+    ctx.fillText("TESTERS ONLINE", COL, y + 14);
+    ctx.letterSpacing = "0px";
+    y += 26;
 
     const colStartY = y;
 
     // ── Queue rows ────────────────────────────────────────────────────────
     if (count === 0) {
       ctx.fillStyle = TEXT_DIM;
-      ctx.font = "400 12px Inter";
-      ctx.fillText("No one in queue", PAD, y + 22);
+      ctx.font = "400 13px PlusJakartaSans";
+      ctx.fillText("No one in queue", PAD, y + 24);
     } else {
       for (let i = 0; i < queuePlayerIds.length; i++) {
         const ry = y + i * ROW_H;
@@ -920,27 +926,27 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
           ctx.fillStyle = ROW_LINE;
           ctx.fillRect(PAD, ry, COL - PAD - 16, 1);
         }
-        // rank
+        // rank number
         ctx.fillStyle = TEXT_DIM;
-        ctx.font = "600 11px Inter";
-        ctx.fillText(String(i + 1), PAD, ry + 23);
+        ctx.font = "700 11px PlusJakartaSans";
+        ctx.fillText(String(i + 1), PAD, ry + 25);
         // head
-        const hx = PAD + 18, hy = ry + 7, hs = 22;
+        const hx = PAD + 20, hy = ry + 8, hs = 24;
         if (queueHeads[i]) {
           ctx.save();
-          roundRect(ctx, hx, hy, hs, hs, 4);
+          roundRect(ctx, hx, hy, hs, hs, 5);
           ctx.clip();
           ctx.drawImage(queueHeads[i], hx, hy, hs, hs);
           ctx.restore();
         } else {
           ctx.fillStyle = "rgba(255,255,255,0.07)";
-          roundRect(ctx, hx, hy, hs, hs, 4);
+          roundRect(ctx, hx, hy, hs, hs, 5);
           ctx.fill();
         }
         // name
         ctx.fillStyle = TEXT;
-        ctx.font = "500 13px Inter";
-        ctx.fillText(queueNames[i], hx + hs + 8, ry + 23);
+        ctx.font = "600 13px PlusJakartaSans";
+        ctx.fillText(queueNames[i], hx + hs + 9, ry + 25);
       }
     }
 
@@ -949,63 +955,69 @@ async function buildQueueAttachment(queueKey, gamemode, guild, { isHigh = false 
     const rightEdge = W - PAD;
     if (testerIds.length === 0) {
       ctx.fillStyle = TEXT_DIM;
-      ctx.font = "400 12px Inter";
-      ctx.fillText("None online", COL, colStartY + 22);
+      ctx.font = "400 13px PlusJakartaSans";
+      ctx.fillText("None online", COL, colStartY + 24);
     } else {
       for (let i = 0; i < testerIds.length; i++) {
-        ctx.font = "600 10px Inter";
+        ctx.font = "600 11px PlusJakartaSans";
         const tw = ctx.measureText(testerNames[i]).width;
-        const cw = tw + 16;
-        if (cx + cw > rightEdge) { cx = COL; cy += CHIP_H + 6; }
+        const cw = tw + 18;
+        if (cx + cw > rightEdge) { cx = COL; cy += CHIP_H + 8; }
         ctx.fillStyle = ACCENT_DIM;
-        roundRect(ctx, cx, cy, cw, CHIP_H, 11);
+        roundRect(ctx, cx, cy, cw, CHIP_H, 12);
         ctx.fill();
+        ctx.strokeStyle = "rgba(63,160,245,0.18)";
+        ctx.lineWidth = 1;
+        roundRect(ctx, cx + 0.5, cy + 0.5, cw - 1, CHIP_H - 1, 12);
+        ctx.stroke();
         ctx.fillStyle = ACCENT;
-        ctx.fillText(testerNames[i], cx + 8, cy + 15);
+        ctx.fillText(testerNames[i], cx + 9, cy + 16);
         cx += cw + 6;
       }
     }
 
     const bodyRowsH = Math.max(
       count > 0 ? count * ROW_H : ROW_H,
-      testerIds.length === 0 ? ROW_H : Math.ceil(testerIds.length / 4) * (CHIP_H + 6)
+      testerIds.length === 0 ? ROW_H : Math.ceil(testerIds.length / 4) * (CHIP_H + 8)
     );
     y = colStartY + bodyRowsH;
 
     // ── Currently testing row ─────────────────────────────────────────────
     if (activeTesteeName) {
-      y += 8;
+      y += 10;
       ctx.fillStyle = ROW_LINE;
       ctx.fillRect(PAD, y, W - PAD * 2, 1);
-      y += 10;
+      y += 12;
+      ctx.font = "700 10px PlusJakartaSans";
       ctx.fillStyle = TEXT_DIM;
-      ctx.font = "600 10px Inter";
-      ctx.fillText("CURRENTLY TESTING", PAD, y + 13);
-      y += 20;
+      ctx.letterSpacing = "0.8px";
+      ctx.fillText("CURRENTLY TESTING", PAD, y + 14);
+      ctx.letterSpacing = "0px";
+      y += 22;
       if (activeHead) {
         ctx.save();
-        roundRect(ctx, PAD, y, 22, 22, 4);
+        roundRect(ctx, PAD, y, 24, 24, 5);
         ctx.clip();
-        ctx.drawImage(activeHead, PAD, y, 22, 22);
+        ctx.drawImage(activeHead, PAD, y, 24, 24);
         ctx.restore();
         ctx.fillStyle = TEXT;
-        ctx.font = "600 13px Inter";
-        ctx.fillText(activeTesteeName, PAD + 30, y + 16);
+        ctx.font = "600 14px PlusJakartaSans";
+        ctx.fillText(activeTesteeName, PAD + 32, y + 17);
       } else {
         ctx.fillStyle = TEXT;
-        ctx.font = "600 13px Inter";
-        ctx.fillText(activeTesteeName, PAD, y + 16);
+        ctx.font = "600 14px PlusJakartaSans";
+        ctx.fillText(activeTesteeName, PAD, y + 17);
       }
     }
 
     // ── Footer note ───────────────────────────────────────────────────────
     if (isHigh || locked) {
-      ctx.fillStyle = isHigh ? "#f0b429" : EMBER;
-      ctx.font = "400 10px Inter";
+      ctx.fillStyle = isHigh ? "#f59e0b" : EMBER;
+      ctx.font = "500 11px PlusJakartaSans";
       ctx.fillText(
         isHigh ? (locked ? "★ LT3+ only  ·  Locked" : "★ LT3+ players only")
                : "Locked — not accepting new joins",
-        PAD, H - PAD + 4
+        PAD, H - PAD + 6
       );
     }
   }
