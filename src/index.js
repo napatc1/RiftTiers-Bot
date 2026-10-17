@@ -18,6 +18,7 @@ const {
   Partials,
   StringSelectMenuBuilder,
   AttachmentBuilder,
+  ActivityType,
 } = require("discord.js");
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const path = require("path");
@@ -3838,6 +3839,10 @@ client.on("interactionCreate", async (interaction) => {
 
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  client.user.setActivity("RyftTiers", {
+    type: ActivityType.Streaming,
+    url: "https://www.youtube.com/@napatc1",
+  });
 
   // Load the persisted queue-message tracking before anything can post or
   // refresh a queue card — otherwise the first post after every restart
