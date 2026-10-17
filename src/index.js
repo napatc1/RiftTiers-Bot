@@ -3841,7 +3841,7 @@ client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   client.user.setActivity("RyftTiers", {
     type: ActivityType.Streaming,
-    url: "https://www.youtube.com/@napatc1",
+    url: "https://www.twitch.tv/napatc1",
   });
 
   // Load the persisted queue-message tracking before anything can post or
