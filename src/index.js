@@ -1849,12 +1849,14 @@ client.on("interactionCreate", async (interaction) => {
     if (!isTester(interaction.member)) {
       return interaction.reply({ content: "Only testers can use this command.", ephemeral: true });
     }
-    const parsed = parseChannelName(interaction.channel.name);
-    if (!parsed) {
+    const isTestChannel = testWaitlistChannelId && interaction.channel.id === testWaitlistChannelId;
+    const parsed = isTestChannel ? null : parseChannelName(interaction.channel.name);
+    if (!isTestChannel && !parsed) {
       return interaction.reply({ content: "Run this inside a tier-test queue channel.", ephemeral: true });
     }
-    const { gamemode, region } = parsed;
-    const queueKey = `${gamemode}:${region}`;
+    const gamemode = isTestChannel ? TEST_QUEUE_GAMEMODE : parsed.gamemode;
+    const region = isTestChannel ? "NA" : parsed.region;
+    const queueKey = isTestChannel ? TEST_QUEUE_KEY : `${gamemode}:${region}`;
     const action = interaction.options.getString("action");
 
     // --- /tester start ---
