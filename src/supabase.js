@@ -132,6 +132,7 @@ async function clearCooldown(gamemode, discordUserId) {
 // ---------- verification (linking Discord <-> Minecraft username) ----------
 
 async function setVerifiedUsername(discordUserId, mcUsername, platform) {
+  invalidateVerifiedCache(discordUserId);
   const { data: existing } = await supabase
     .from("players")
     .select("id")
@@ -163,22 +164,62 @@ async function setVerifiedUsername(discordUserId, mcUsername, platform) {
     .insert({ username: mcUsername, discord_id: discordUserId, platform: platform || "premium" });
 }
 
+// In-memory cache for verified username lookups — 2 minute TTL.
+// Called many times per queue refresh (once per queued player + active testee).
+const _verifiedCache = new Map(); // discordUserId -> { username, platform, expiresAt }
+const VERIFIED_CACHE_TTL = 2 * 60 * 1000;
+
+function _cacheSet(discordUserId, username, platform) {
+  _verifiedCache.set(discordUserId, { username, platform, expiresAt: Date.now() + VERIFIED_CACHE_TTL });
+}
+
+function _cacheGet(discordUserId) {
+  const entry = _verifiedCache.get(discordUserId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { _verifiedCache.delete(discordUserId); return null; }
+  return entry;
+}
+
 async function getVerifiedUsername(discordUserId) {
+  const cached = _cacheGet(discordUserId);
+  if (cached) return cached.username;
   const { data } = await supabase
     .from("players")
-    .select("username")
+    .select("username, platform")
     .eq("discord_id", discordUserId)
     .maybeSingle();
+  if (data) _cacheSet(discordUserId, data.username, data.platform);
   return data ? data.username : null;
 }
 
 async function getVerifiedPlatform(discordUserId) {
+  const cached = _cacheGet(discordUserId);
+  if (cached) return cached.platform;
   const { data } = await supabase
     .from("players")
-    .select("platform")
+    .select("username, platform")
     .eq("discord_id", discordUserId)
     .maybeSingle();
+  if (data) _cacheSet(discordUserId, data.username, data.platform);
   return data ? data.platform : null;
+}
+
+// Fetches both username and platform in a single query — use this when both are needed.
+async function getVerifiedUser(discordUserId) {
+  const cached = _cacheGet(discordUserId);
+  if (cached) return { username: cached.username, platform: cached.platform };
+  const { data } = await supabase
+    .from("players")
+    .select("username, platform")
+    .eq("discord_id", discordUserId)
+    .maybeSingle();
+  if (data) _cacheSet(discordUserId, data.username, data.platform);
+  return data ? { username: data.username, platform: data.platform } : { username: null, platform: null };
+}
+
+// Invalidates the cache entry when a user verifies so the new username is seen immediately.
+function invalidateVerifiedCache(discordUserId) {
+  _verifiedCache.delete(discordUserId);
 }
 
 // ---------- live tests & results log ----------
@@ -848,6 +889,8 @@ module.exports = {
   setVerifiedUsername,
   getVerifiedUsername,
   getVerifiedPlatform,
+  getVerifiedUser,
+  invalidateVerifiedCache,
   setLiveTest,
   clearLiveTest,
   logTestResult,

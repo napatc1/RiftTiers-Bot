@@ -81,6 +81,8 @@ const {
   setVerifiedUsername,
   getVerifiedUsername,
   getVerifiedPlatform,
+  getVerifiedUser,
+  invalidateVerifiedCache,
   setLiveTest,
   clearLiveTest,
   logTestResult,
@@ -1049,9 +1051,8 @@ function roundRect(ctx, x, y, w, h, r) {
 // Queue card buttons — player-facing only (Join/Leave).
 // Tester actions (start, stop, pull, lock, leave) are now /tester subcommands.
 async function buildQueueButtons(queueKey) {
-  const closed = await isQueueClosed(queueKey);
+  const [closed, locked] = await Promise.all([isQueueClosed(queueKey), getQueueLocked(queueKey)]);
   if (closed) return [];
-  const locked = await getQueueLocked(queueKey);
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -1065,9 +1066,8 @@ async function buildQueueButtons(queueKey) {
 }
 
 async function buildHighQueueButtons(highKey) {
-  const closed = await isQueueClosed(highKey);
+  const [closed, locked] = await Promise.all([isQueueClosed(highKey), getQueueLocked(highKey)]);
   if (closed) return [];
-  const locked = await getQueueLocked(highKey);
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -1158,7 +1158,6 @@ async function clearActiveTestingAndRefresh(guild, ticketChannelId) {
   if (!info) return null;
   try {
     const queueChannel = await guild.channels.fetch(info.queueChannelId);
-    const queueMessage = await queueChannel.messages.fetch(info.queueMessageId);
     const baseKey = `${info.gamemode}:${info.region}`;
     if (info.isHigh) {
       const highKey = `${baseKey}:high`;
@@ -1277,8 +1276,7 @@ async function createTicketChannel(guild, sourceChannel, gamemode, testerMember,
     permissionOverwrites: overwrites,
   });
 
-  const testeeUsername = await getVerifiedUsername(testeeId);
-  const testeePlatform = await getVerifiedPlatform(testeeId);
+  const { username: testeeUsername, platform: testeePlatform } = await getVerifiedUser(testeeId);
   const testeeRecord = testeeUsername ? await getPlayer(testeeUsername) : null;
   const platformLabel = { bedrock: "Bedrock", premium: "Premium", cracked: "Cracked" }[testeePlatform] || "Unknown";
   const testeeInfoLine = testeeUsername
