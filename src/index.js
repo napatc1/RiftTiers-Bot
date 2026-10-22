@@ -1048,6 +1048,231 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// ── Result card ───────────────────────────────────────────────────────────────
+// Generates an 800×320 px PNG card for a tier change.
+// Returns a Buffer (PNG bytes).
+const https = require("https");
+
+/** Fetch a URL as a Buffer, following one redirect. */
+function httpGetBuffer(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 8000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return httpGetBuffer(res.headers.location).then(resolve).catch(reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`HTTP ${res.statusCode}`)); }
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve(Buffer.concat(chunks)));
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+  });
+}
+
+/** Minecraft username → UUID (null on failure). */
+async function resolveMinecraftUUID(username) {
+  try {
+    const buf = await httpGetBuffer(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(username)}`);
+    return JSON.parse(buf.toString()).id || null;
+  } catch { return null; }
+}
+
+/** Crafatar body-render image, or null on failure. */
+async function fetchPlayerSkinImage(username) {
+  try {
+    const uuid = await resolveMinecraftUUID(username);
+    if (!uuid) return null;
+    const buf = await httpGetBuffer(`https://crafatar.com/renders/body/${uuid}?size=120&overlay`);
+    return await loadImage(buf);
+  } catch { return null; }
+}
+
+const TIER_HEX = {
+  HT1: "#FF4444", HT2: "#FF7722", HT3: "#FFAA00",
+  HT4: "#FFDD00", HT5: "#AAFF44",
+  LT1: "#44FF88", LT2: "#00DDCC", LT3: "#44AAFF",
+  LT4: "#8866FF", LT5: "#AAAAAA",
+};
+
+function hexToRGB(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+function darkenHex(hex, amt) {
+  const [r, g, b] = hexToRGB(hex);
+  return `rgb(${Math.round(r * (1 - amt))},${Math.round(g * (1 - amt))},${Math.round(b * (1 - amt))})`;
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.playerName
+ * @param {string} opts.gamemode    internal gamemode id ("vanilla", "sword", …)
+ * @param {string|null} opts.oldTier
+ * @param {string} opts.newTier
+ * @param {string} opts.changedBy   display name / tag of the staff who did it
+ * @param {boolean} [opts.isManual]
+ * @returns {Promise<Buffer>}
+ */
+async function generateResultCard({ playerName, gamemode, oldTier, newTier, changedBy, isManual = false }) {
+  const W = 800, H = 320, PAD = 32, CR = 16;
+
+  // Colour tokens matching the queue card's dark theme
+  const BG    = "#0d1117";
+  const PANEL = "#161b22";
+  const LINE  = "rgba(255,255,255,0.08)";
+  const TEXT  = "#e6edf3";
+  const DIM   = "rgba(230,237,243,0.38)";
+  const ACCENT= "#3b82f6";
+  const FONT  = "PlusJakartaSans";
+
+  const oldCol = oldTier ? (TIER_HEX[oldTier] || "#888888") : "#555555";
+  const newCol = TIER_HEX[newTier] || "#888888";
+
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+
+  // Background
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  // Panel with rounded border
+  roundRect(ctx, 0, 0, W, H, CR);
+  ctx.fillStyle = PANEL;
+  ctx.fill();
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1;
+  roundRect(ctx, 0.5, 0.5, W - 1, H - 1, CR);
+  ctx.stroke();
+
+  // Top gradient accent using tier colours
+  const topGrad = ctx.createLinearGradient(0, 0, W, 0);
+  topGrad.addColorStop(0, oldCol + "66");
+  topGrad.addColorStop(1, newCol + "66");
+  ctx.fillStyle = topGrad;
+  roundRect(ctx, 0, 0, W, 4, CR);
+  ctx.fill();
+
+  // Subtle background glow from new tier colour
+  const glow = ctx.createRadialGradient(W * 0.75, H * 0.5, 0, W * 0.75, H * 0.5, W * 0.55);
+  glow.addColorStop(0, hexToRGB(newCol).map(v => v).join(",") && `rgba(${hexToRGB(newCol).join(",")},0.07)`);
+  glow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── Header row ────────────────────────────────────────────────────────────
+  ctx.textBaseline = "alphabetic";
+
+  // RyftTiers wordmark
+  ctx.font = `600 11px ${FONT}`;
+  ctx.fillStyle = DIM;
+  ctx.fillText("Ryft", PAD, PAD + 14);
+  const ryftW = ctx.measureText("Ryft").width;
+  ctx.fillStyle = ACCENT;
+  ctx.fillText("Tiers", PAD + ryftW, PAD + 14);
+
+  // Card type label (right-aligned)
+  const cardLabel = isManual ? "MANUAL CHANGE" : "TIER TEST RESULT";
+  ctx.font = `600 10px ${FONT}`;
+  ctx.fillStyle = DIM;
+  const labelW = ctx.measureText(cardLabel).width;
+  ctx.fillText(cardLabel, W - PAD - labelW, PAD + 14);
+
+  // Divider
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PAD, PAD + 28);
+  ctx.lineTo(W - PAD, PAD + 28);
+  ctx.stroke();
+
+  // ── Skin (left) ───────────────────────────────────────────────────────────
+  const SKIN_X = PAD;
+  const SKIN_Y = PAD + 40;
+  const SKIN_H = H - SKIN_Y - PAD;
+  const skinImg = await fetchPlayerSkinImage(playerName);
+
+  if (skinImg) {
+    const aspect = skinImg.width / skinImg.height;
+    const drawH = SKIN_H;
+    const drawW = Math.round(drawH * aspect);
+    ctx.drawImage(skinImg, SKIN_X, SKIN_Y, drawW, drawH);
+  } else {
+    // Ghost placeholder
+    roundRect(ctx, SKIN_X, SKIN_Y, 62, SKIN_H, 8);
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    ctx.fill();
+  }
+
+  // ── Content (right of skin) ───────────────────────────────────────────────
+  const CX = SKIN_X + 72 + 28;
+  const CY = SKIN_Y + 12;
+
+  // Gamemode
+  const gmLabel = (GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode).toUpperCase();
+  ctx.font = `500 12px ${FONT}`;
+  ctx.fillStyle = DIM;
+  ctx.fillText(gmLabel, CX, CY);
+
+  // Player name
+  ctx.font = `800 32px ${FONT}`;
+  ctx.fillStyle = TEXT;
+  ctx.fillText(playerName, CX, CY + 40);
+
+  // Tier pills
+  const PILL_Y = CY + 70;
+  const PILL_H = 44;
+
+  function drawPill(label, color, x) {
+    ctx.font = `700 22px ${FONT}`;
+    const tw = ctx.measureText(label).width;
+    const pw = tw + 26;
+    roundRect(ctx, x, PILL_Y, pw, PILL_H, 10);
+    ctx.fillStyle = darkenHex(color, 0.72);
+    ctx.fill();
+    ctx.strokeStyle = color + "aa";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.fillText(label, x + 13, PILL_Y + PILL_H - 11);
+    return pw;
+  }
+
+  const oldLabel = oldTier || "Untested";
+  const oldPW = drawPill(oldLabel, oldCol, CX);
+
+  // Arrow
+  ctx.font = `500 22px ${FONT}`;
+  ctx.fillStyle = DIM;
+  const arrowX = CX + oldPW + 14;
+  ctx.fillText("→", arrowX, PILL_Y + PILL_H - 11);
+  const arrowW = ctx.measureText("→").width;
+
+  drawPill(newTier, newCol, arrowX + arrowW + 14);
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  const footerY = H - PAD;
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PAD, footerY - 22);
+  ctx.lineTo(W - PAD, footerY - 22);
+  ctx.stroke();
+
+  ctx.font = `400 12px ${FONT}`;
+  ctx.fillStyle = DIM;
+  ctx.fillText("Changed by", CX, footerY - 6);
+  const cbW = ctx.measureText("Changed by  ").width;
+  ctx.font = `600 12px ${FONT}`;
+  ctx.fillStyle = TEXT;
+  ctx.fillText(changedBy, CX + cbW, footerY - 6);
+
+  return canvas.toBuffer("image/png");
+}
+// ── end result card ──────────────────────────────────────────────────────────
+
 // Queue card buttons — player-facing only (Join/Leave).
 // Tester actions (start, stop, pull, lock, leave) are now /tester subcommands.
 async function buildQueueButtons(queueKey) {
@@ -2800,22 +3025,38 @@ client.on("interactionCreate", async (interaction) => {
           .fetch(process.env.RESULTS_CHANNEL_ID)
           .catch(() => null);
         if (resultsChannel) {
-          const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
-          await resultsChannel.send({
-            embeds: [
-              new EmbedBuilder()
-                .setTitle(`${gamemode.toUpperCase()} — Manual change`)
-                .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
-                .setColor(0xffd54a)
-                .addFields(
-                  { name: "Player", value: username, inline: true },
-                  { name: "Changed by", value: `<@${interaction.user.id}>`, inline: true },
-                  { name: "​", value: "​", inline: true },
-                  { name: "Old tier", value: previousTier || "Untested", inline: true },
-                  { name: "New tier", value: tier, inline: true },
-                ),
-            ],
-          });
+          try {
+            const cardBuf = await generateResultCard({
+              playerName: username,
+              gamemode,
+              oldTier: previousTier || null,
+              newTier: tier,
+              changedBy: interaction.user.tag,
+              isManual: true,
+            });
+            await resultsChannel.send({
+              content: `**${username}** — ${(GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode).toUpperCase()} manual change`,
+              files: [{ attachment: cardBuf, name: "result.png" }],
+            });
+          } catch (cardErr) {
+            console.error("[resultCard] failed, using embed fallback:", cardErr.message);
+            const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
+            await resultsChannel.send({
+              embeds: [
+                new EmbedBuilder()
+                  .setTitle(`${gamemode.toUpperCase()} — Manual change`)
+                  .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(username)}`)
+                  .setColor(0xffd54a)
+                  .addFields(
+                    { name: "Player", value: username, inline: true },
+                    { name: "Changed by", value: `<@${interaction.user.id}>`, inline: true },
+                    { name: "​", value: "​", inline: true },
+                    { name: "Old tier", value: previousTier || "Untested", inline: true },
+                    { name: "New tier", value: tier, inline: true },
+                  ),
+              ],
+            });
+          }
         }
       }
 
@@ -3739,25 +3980,42 @@ client.on("interactionCreate", async (interaction) => {
           .fetch(process.env.RESULTS_CHANNEL_ID)
           .catch(() => null);
         if (resultsChannel) {
-          const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
-          await resultsChannel.send({
-            content: testeeId ? `<@${testeeId}>` : null,
-            embeds: [
-              new EmbedBuilder()
-                .setTitle(`${gamemode.toUpperCase()} result`)
-                .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(name)}`)
-                .setColor(0xffd54a)
-                .addFields(
-                  { name: "Player", value: name, inline: true },
-                  { name: "Region", value: region, inline: true },
-                  { name: "​", value: "​", inline: true },
-                  { name: "Old tier", value: previousTier || "Untested", inline: true },
-                  { name: "New tier", value: changeText.includes("→") ? changeText.split(" → ")[1] : tier, inline: true },
-                  { name: "​", value: "​", inline: true },
-                  { name: "Tester", value: `<@${interaction.user.id}>`, inline: true },
-                ),
-            ],
-          });
+          try {
+            const cardBuf = await generateResultCard({
+              playerName: name,
+              gamemode,
+              oldTier: previousTier || null,
+              newTier: tier,
+              changedBy: interaction.user.tag,
+              isManual: false,
+            });
+            const mention = testeeId ? `<@${testeeId}> ` : "";
+            await resultsChannel.send({
+              content: `${mention}**${name}** — ${(GAMEMODE_PING_ROLE_NAMES[gamemode] || gamemode).toUpperCase()} result`,
+              files: [{ attachment: cardBuf, name: "result.png" }],
+            });
+          } catch (cardErr) {
+            console.error("[resultCard] failed, using embed fallback:", cardErr.message);
+            const changeText = previousTier ? `${previousTier} → ${tier}` : `Untested → ${tier}`;
+            await resultsChannel.send({
+              content: testeeId ? `<@${testeeId}>` : null,
+              embeds: [
+                new EmbedBuilder()
+                  .setTitle(`${gamemode.toUpperCase()} result`)
+                  .setThumbnail(`https://mc-heads.net/body/${encodeURIComponent(name)}`)
+                  .setColor(0xffd54a)
+                  .addFields(
+                    { name: "Player", value: name, inline: true },
+                    { name: "Region", value: region, inline: true },
+                    { name: "​", value: "​", inline: true },
+                    { name: "Old tier", value: previousTier || "Untested", inline: true },
+                    { name: "New tier", value: changeText.includes("→") ? changeText.split(" → ")[1] : tier, inline: true },
+                    { name: "​", value: "​", inline: true },
+                    { name: "Tester", value: `<@${interaction.user.id}>`, inline: true },
+                  ),
+              ],
+            });
+          }
         }
       }
 
