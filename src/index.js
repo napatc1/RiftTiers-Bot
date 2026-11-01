@@ -19,6 +19,7 @@ const {
   StringSelectMenuBuilder,
   AttachmentBuilder,
   ActivityType,
+  Status,
 } = require("discord.js");
 const { createCanvas, loadImage, GlobalFonts } = require("@napi-rs/canvas");
 const path = require("path");
@@ -1647,6 +1648,9 @@ async function postHighResult(guild, { username, discordId, gamemode, previousTi
 // ---------- interactions ----------
 
 client.on("interactionCreate", async (interaction) => {
+ if (interaction.isChatInputCommand()) {
+   console.log(`[interaction] /${interaction.commandName} ${interaction.options.getString("action") ?? ""} by ${interaction.user.tag} (age ${Date.now() - interaction.createdTimestamp}ms)`);
+ }
  try {
 
   // /util sendrules — posts the server rules embed in the current channel
@@ -4585,13 +4589,72 @@ process.on("uncaughtException", (err) => {
   console.error("Uncaught exception:", err);
 });
 
+// ---------- gateway health ----------
+// Slash commands arrive over the Discord gateway websocket. If that
+// connection silently dies, the process keeps running (REST calls like the
+// 10-minute role sync still work) but every command shows "The application
+// did not respond". Log the connection lifecycle so drops are visible, and
+// exit when the gateway has been unhealthy for a while so the host restarts
+// the process with a fresh connection.
+client.on("shardDisconnect", (event, id) => console.warn(`[gateway] shard ${id} disconnected (code ${event?.code})`));
+client.on("shardReconnecting", (id) => console.warn(`[gateway] shard ${id} reconnecting`));
+client.on("shardResume", (id, replayed) => console.log(`[gateway] shard ${id} resumed (${replayed} events replayed)`));
+client.on("shardReady", (id) => console.log(`[gateway] shard ${id} ready`));
+client.on("shardError", (err, id) => console.error(`[gateway] shard ${id} error:`, err?.message || err));
+client.on("invalidated", () => {
+  console.error("[gateway] session invalidated, restarting process");
+  process.exit(1);
+});
+
+const GATEWAY_STALE_MS = 5 * 60 * 1000;
+const bootedAt = Date.now();
+let gatewayUnhealthySince = null;
+
+setInterval(() => {
+  const now = Date.now();
+  let problem = null;
+
+  if (client.ws.status !== Status.Ready) {
+    problem = `status ${Status[client.ws.status] ?? client.ws.status}`;
+  } else {
+    for (const shard of client.ws.shards.values()) {
+      // lastPingTimestamp is set on every heartbeat ACK (~every 41s).
+      const last = shard.lastPingTimestamp > 0 ? shard.lastPingTimestamp : bootedAt;
+      if (now - last > GATEWAY_STALE_MS) {
+        problem = `shard ${shard.id} has had no heartbeat ACK for ${Math.round((now - last) / 1000)}s`;
+        break;
+      }
+    }
+  }
+
+  if (!problem) {
+    if (gatewayUnhealthySince) console.log("[gateway] healthy again");
+    gatewayUnhealthySince = null;
+    return;
+  }
+
+  if (!gatewayUnhealthySince) {
+    gatewayUnhealthySince = now;
+    console.warn(`[gateway] unhealthy: ${problem}`);
+  }
+  if (now - gatewayUnhealthySince > GATEWAY_STALE_MS) {
+    console.error(`[gateway] unhealthy for over ${GATEWAY_STALE_MS / 60000} min (${problem}), restarting process`);
+    process.exit(1);
+  }
+}, 60 * 1000).unref();
+
 // Render's free tier is built for web apps, not background workers. This
 // tiny server does nothing except answer "OK" so Render (and an uptime
 // pinger, if you set one up) sees the app as alive. It has no effect on
 // the actual Discord bot logic above.
 const http = require("http");
 http
-  .createServer((req, res) => res.end("RyftTiers bot is running."))
+  .createServer((req, res) => {
+    // 503 when the Discord gateway is down, so an uptime pinger notices.
+    const ready = client.ws.status === Status.Ready;
+    res.statusCode = ready ? 200 : 503;
+    res.end(ready ? "RyftTiers bot is running." : "RyftTiers bot is not connected to Discord.");
+  })
   .listen(process.env.PORT || 3000);
 
 if (!process.env.DISCORD_TOKEN) {
