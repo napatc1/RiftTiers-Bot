@@ -4601,6 +4601,14 @@ client.on("shardReconnecting", (id) => console.warn(`[gateway] shard ${id} recon
 client.on("shardResume", (id, replayed) => console.log(`[gateway] shard ${id} resumed (${replayed} events replayed)`));
 client.on("shardReady", (id) => console.log(`[gateway] shard ${id} ready`));
 client.on("shardError", (err, id) => console.error(`[gateway] shard ${id} error:`, err?.message || err));
+client.on("debug", (msg) => {
+  if (/heartbeat/i.test(msg)) return;
+  console.log(`[discord debug] ${msg}`);
+});
+client.rest.on("rateLimited", (info) => {
+  console.warn(`[discord rest] rate limited on ${info.method} ${info.route}: retry in ${info.retryAfter}ms (global: ${info.global}, scope: ${info.scope})`);
+});
+client.rest.on("restDebug", (msg) => console.log(`[discord rest debug] ${msg}`));
 client.on("invalidated", () => {
   console.error("[gateway] session invalidated, restarting process");
   process.exit(1);
