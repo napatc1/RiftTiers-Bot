@@ -4601,9 +4601,32 @@ client.on("shardReconnecting", (id) => console.warn(`[gateway] shard ${id} recon
 client.on("shardResume", (id, replayed) => console.log(`[gateway] shard ${id} resumed (${replayed} events replayed)`));
 client.on("shardReady", (id) => console.log(`[gateway] shard ${id} ready`));
 client.on("shardError", (err, id) => console.error(`[gateway] shard ${id} error:`, err?.message || err));
+// Discord allows 1000 logins (identifies) per bot per 24h. A reconnect loop
+// inside discord.js can burn through that in hours and lock the bot out for
+// a day, so cap identifies per hour and pause logging in when it's exceeded.
+const MAX_IDENTIFIES_PER_HOUR = 20;
+const IDENTIFY_PAUSE_MS = 30 * 60 * 1000;
+const identifyTimes = [];
+let identifyPausedUntil = 0;
+
 client.on("debug", (msg) => {
   if (/heartbeat/i.test(msg)) return;
   console.log(`[discord debug] ${msg}`);
+
+  if (!msg.includes("Identifying")) return;
+  const now = Date.now();
+  identifyTimes.push(now);
+  while (identifyTimes.length && now - identifyTimes[0] > 60 * 60 * 1000) identifyTimes.shift();
+  if (identifyTimes.length > MAX_IDENTIFIES_PER_HOUR && now >= identifyPausedUntil) {
+    identifyPausedUntil = now + IDENTIFY_PAUSE_MS;
+    console.error(`[gateway] ${identifyTimes.length} logins in the last hour, pausing for ${IDENTIFY_PAUSE_MS / 60000} min to protect the daily login limit`);
+    client.destroy().catch(() => {});
+    setTimeout(() => {
+      identifyTimes.length = 0;
+      console.log("[gateway] login pause over, reconnecting");
+      client.login(process.env.DISCORD_TOKEN).catch((err) => console.error("[gateway] re-login failed:", err.message));
+    }, IDENTIFY_PAUSE_MS);
+  }
 });
 client.rest.on("rateLimited", (info) => {
   console.warn(`[discord rest] rate limited on ${info.method} ${info.route}: retry in ${info.retryAfter}ms (global: ${info.global}, scope: ${info.scope})`);
@@ -4633,6 +4656,12 @@ setInterval(() => {
         break;
       }
     }
+  }
+
+  // Deliberately disconnected to protect the login limit; don't restart.
+  if (now < identifyPausedUntil) {
+    gatewayUnhealthySince = null;
+    return;
   }
 
   if (!problem) {
