@@ -4632,10 +4632,26 @@ client.rest.on("rateLimited", (info) => {
   console.warn(`[discord rest] rate limited on ${info.method} ${info.route}: retry in ${info.retryAfter}ms (global: ${info.global}, scope: ${info.scope})`);
 });
 client.rest.on("restDebug", (msg) => console.log(`[discord rest debug] ${msg}`));
-client.on("invalidated", () => {
-  console.error("[gateway] session invalidated, restarting process");
-  process.exit(1);
-});
+// Reconnect inside the process instead of exiting: on Render's free tier an
+// exited process is not reliably restarted, which left the bot fully offline.
+let reconnecting = false;
+async function reconnectGateway(reason) {
+  if (reconnecting) return;
+  reconnecting = true;
+  console.error(`[gateway] reconnecting: ${reason}`);
+  try {
+    await client.destroy();
+  } catch {}
+  try {
+    await client.login(process.env.DISCORD_TOKEN);
+  } catch (err) {
+    console.error("[gateway] re-login failed:", err.message);
+  } finally {
+    reconnecting = false;
+  }
+}
+
+client.on("invalidated", () => reconnectGateway("session invalidated"));
 
 const GATEWAY_STALE_MS = 5 * 60 * 1000;
 const bootedAt = Date.now();
@@ -4675,8 +4691,11 @@ setInterval(() => {
     console.warn(`[gateway] unhealthy: ${problem}`);
   }
   if (now - gatewayUnhealthySince > GATEWAY_STALE_MS) {
-    console.error(`[gateway] unhealthy for over ${GATEWAY_STALE_MS / 60000} min (${problem}), restarting process`);
-    process.exit(1);
+    gatewayUnhealthySince = null;
+    // Idle with a login still in flight usually means discord.js is waiting
+    // out a REST rate limit; it will continue by itself, so don't pile on.
+    if (reconnecting) return;
+    reconnectGateway(`unhealthy for over ${GATEWAY_STALE_MS / 60000} min (${problem})`);
   }
 }, 60 * 1000).unref();
 
