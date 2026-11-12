@@ -246,12 +246,6 @@ const commands = [
           { name: "Fix",     value: "Fix"     },
         )
     ),
-
-  // Temporary: creates the 5 Spear Mace queue channels (one per region)
-  // without a full /util rebuildqueues. Safe to remove once they exist.
-  new SlashCommandBuilder()
-    .setName("addspearmace")
-    .setDescription("Create the Spear Mace queue channels for every region. (Managers/owners only)"),
 ];
 
 module.exports = commands;
