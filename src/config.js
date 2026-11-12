@@ -10,11 +10,13 @@ const GAMEMODE_CHANNELS = {
   "smp-tiertest": "smp",
   "uhc-tiertest": "uhc",
   "cart-tiertest": "cart",
+  "spear-mace-tiertest": "spearmace",
 };
 
 // Every gamemode id the bot knows about (should match the values above).
 const GAMEMODES = [
   "vanilla", "axe", "sword", "mace", "nethop", "pot", "smp", "uhc", "cart",
+  "spearmace",
 ];
 
 // Every region the bot/website split queues by. A tiertest channel now
@@ -36,6 +38,7 @@ const GAMEMODE_EMOJIS = {
   smp: "🌍",
   uhc: "❤️",
   cart: "🛒",
+  spearmace: "🔱",
 };
 
 // Reverse of GAMEMODE_CHANNELS: gamemode id -> its plain (no-emoji, no
@@ -92,6 +95,7 @@ const GAMEMODE_PING_ROLE_NAMES = {
   smp: "SMP",
   uhc: "UHC",
   cart: "Cart",
+  spearmace: "Spear Mace",
 };
 
 // Discord role names for each region — assigned automatically when a player
